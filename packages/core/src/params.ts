@@ -22,7 +22,13 @@ export const TreatmentEffect = {
 };
 
 export const PlanningParams = {
+  // Legacy export for callers; CA-derived travel costs no longer use this speed.
   baseRosMPerMinute: 5,
+  referenceCellSize: 25,
+  // Synthetic CA alignment: median observed/predicted ratio was 0.3469 on
+  // mock 128², wind 3/6/10 m/s, reference seed 1. Rounded to avoid false precision.
+  // Seeds 2–3 were held out; this is NOT an Eaton/operational calibration.
+  arrivalTimeScale: 0.35,
   minRos: 0.000001,
   maxRos: 500,
   costPerCell: { break: 100, burn: 30, thin: 60, zone0: 250 },
