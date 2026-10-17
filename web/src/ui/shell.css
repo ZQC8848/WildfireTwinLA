@@ -931,6 +931,13 @@ body.painting #app canvas {
   pointer-events: auto;
   transform-origin: 50% 100%;
   box-shadow: 0 2px 6px rgb(0 0 0 / 0.35);
+  /* 出现、消失、被遮挡时的淡入淡出（ui/homeAlerts.ts） */
+  transition: opacity 160ms ease;
+}
+
+/* 与更紧急的气泡重叠：调淡（透明度由脚本设置），不响应点击 */
+.alert-bubble.covered {
+  pointer-events: none;
 }
 
 .alert-bubble[hidden] {
@@ -1038,6 +1045,10 @@ body.painting #app canvas {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .alert-bubble {
+    transition: none;
+  }
+
   .alert-bubble.burning .alert-icon {
     animation: none;
   }

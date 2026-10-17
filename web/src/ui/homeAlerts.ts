@@ -1,20 +1,35 @@
 // 房屋冒泡提示（参考《城市天际线》）：着火、烧毁、受威胁的房屋上方显示图标气泡。
 // - HTML 叠加层：与界面同一套字体和配色，文字清晰，悬停与点击容易处理
-// - 每帧把锚点投影到屏幕，按 CELL_PX 的屏幕网格聚合，再按紧急程度依次放置、过近的并入已放置的（避免重叠）；
-//   聚合气泡只显示最紧急状态的图标与数量，分项计数在悬停卡片里；拉近后自动拆成单栋
-// - 单栋气泡在状态变化时弹出；着火的气泡持续脉动（系统"减少动态效果"时关闭，见 shell.css）
+// - 在地面坐标里聚合（参照地图应用的缩放级别）：整个画面用同一个距离档，由相机离地高度决定，
+//   每档的地面格子大小翻倍，在典型观察距离上投影到屏幕约 TARGET_PX 像素。平移、旋转相机时格子不动、
+//   组的成员不变；只有推拉镜头跨档时才整体合并或拆开。换档带滞后（HYST）。
+//   组的位置取成员锚点在地面上的中心，再投影到屏幕。透视让远处的组挤在一起时，靠下面的"重叠调淡"处理
+// - 范围与数量上限按组到画面焦点（轨道中心，飞行模式下为视线前方的地面点）的水平距离计算：
+//   绕焦点旋转时距离不变，显示哪些组也不变。两者都带滞后：已显示的组超出范围 10% 才移除，排序时距离按 85% 计
+// - 每个气泡按组的固定标识（档 + 格子）复用 DOM 元素；新出现的淡入、消失的原地淡出
+// - 屏幕上与更紧急的气泡重叠时调淡并不响应点击，不合并（合并正是闪烁的来源）
+// - 聚合气泡只显示最紧急状态的图标与数量，分项计数在悬停卡片里；单栋气泡在状态变化时弹出，着火的持续脉动
 // - 悬停显示详情卡片，点击时相机飞过去（聚合气泡拉近到该区域）
-// - 距离上限：只显示离相机 range 以内的房屋，range = max(minRange, rangeFactor × 相机离地高度)，
-//   随镜头远近自动调整；接近上限时淡出。数量上限：最多 maxVisible 个气泡，超出时按紧急程度、再按距离取前面的
+// - 距离上限：只显示离相机 range 以内的组，range = max(minRange, rangeFactor × 相机离地高度)，接近上限时淡出。
+//   数量上限：最多 maxVisible 个，超出时按紧急程度、再按距离取前面的
 
 import * as THREE from "three";
 import type { HomeAlert, HomeState } from "../sim/homeStatus";
 
-const CELL_PX = 54;
-/** 两个气泡中心距离小于此值时合并 */
-const MERGE_PX = 46;
+/** 组的地面格子投影到屏幕的目标尺寸（像素，按 900 像素高的参考画布计算，窗口尺寸变化不影响分组） */
+const TARGET_PX = 56;
+const REF_HEIGHT_PX = 900;
+/** 第 0 档的距离（米）；更近的都算第 0 档 */
+const BASE_DIST_M = 100;
+/** 典型观察距离 = 相机离地高度 × 此值（斜视时视线比高度长，画面中部的地面通常在 2–3 倍高度处） */
+const VIEW_DIST_PER_HEIGHT = 2.5;
+/** 换档滞后（log2 单位，约 15%） */
+const HYST = 0.2;
+/** 与更紧急的气泡中心距离小于此值时调淡 */
+const OVERLAP_PX = 30;
 const MAX_BUBBLES = 160;
 const POP_MS = 450;
+const FADE_MS = 160;
 const PRIORITY: Record<HomeState, number> = { burning: 0, threat: 1, burned: 2 };
 
 const ICONS: Record<HomeState, string> = {
@@ -25,16 +40,25 @@ const ICONS: Record<HomeState, string> = {
 
 interface Cluster {
   key: string;
-  x: number;
-  y: number;
+  /** 成员锚点的平均（世界坐标） */
+  anchor: THREE.Vector3;
   n: number;
-  /** 成员中离相机最近的距离（米） */
+  /** 组中心到画面焦点的水平距离（米） */
   dist: number;
   counts: Record<HomeState, number>;
   top: HomeAlert;
   members: HomeAlert[];
   newest: number;
   minEta?: number;
+}
+
+interface Bubble {
+  el: HTMLButtonElement;
+  cluster: Cluster | null;
+  /** 最近一次的锚点；淡出期间仍按它定位 */
+  anchor: THREE.Vector3;
+  bornAt: number;
+  dyingAt: number | null;
 }
 
 export interface HomeAlertHandlers {
@@ -45,14 +69,16 @@ export interface HomeAlertHandlers {
 
 export class HomeAlerts {
   readonly root: HTMLDivElement;
-  private pool: HTMLButtonElement[] = [];
   private items: HomeAlert[] = [];
   private visible = true;
   private v = new THREE.Vector3();
-  private clusters: Cluster[] = [];
+  private bubbles = new Map<string, Bubble>();
+  private free: HTMLButtonElement[] = [];
+  /** 当前的距离档（带滞后） */
+  private level = -1;
   private reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
   /** 同时显示的气泡上限 */
-  maxVisible = 40;
+  maxVisible = 12;
   /** 距离上限 = max(minRange, rangeFactor × 相机离地高度)，单位米 */
   rangeFactor = 3;
   minRange = 1500;
@@ -65,6 +91,8 @@ export class HomeAlerts {
     private describe: (a: HomeAlert) => { title: string; rows: [string, string][] },
     /** 世界坐标 (x, z) 处的地面高度（显示坐标） */
     private groundAt: (x: number, z: number) => number,
+    /** 画面焦点（世界坐标）：范围与排序以它为中心 */
+    private focus: () => THREE.Vector3,
     /** 显示数量变化时回调：显示了多少、超出上限前共有多少 */
     private onCount?: (shown: number, total: number) => void,
   ) {
@@ -87,7 +115,42 @@ export class HomeAlerts {
     this.root.classList.toggle("night", night);
   }
 
-  /** 每帧调用：投影、聚合、更新气泡 */
+  /** 地面格子大小（米）：第 level 档的格子投影到屏幕约 TARGET_PX 像素 */
+  private cellSize(level: number): number {
+    const focal = REF_HEIGHT_PX / 2 / Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2);
+    return (TARGET_PX * BASE_DIST_M * 2 ** (level + 0.5)) / focal;
+  }
+
+  /** 按地面格子分组；整个画面同一个距离档（由相机离地高度决定，带滞后），平移旋转不会改变分组 */
+  private cluster(focus: THREE.Vector3, height: number): Map<string, Cluster> {
+    const l = Math.log2(Math.max(height * VIEW_DIST_PER_HEIGHT, BASE_DIST_M) / BASE_DIST_M);
+    if (this.level < 0 || l < this.level - HYST || l >= this.level + 1 + HYST) this.level = Math.floor(l);
+    const level = this.level;
+    const size = this.cellSize(level);
+    const map = new Map<string, Cluster>();
+    for (const a of this.items) {
+      const key = `${level}:${Math.floor(a.anchor.x / size)}:${Math.floor(a.anchor.z / size)}`;
+      let c = map.get(key);
+      if (!c) {
+        c = { key, anchor: new THREE.Vector3(), n: 0, dist: 0, counts: { burning: 0, burned: 0, threat: 0 }, top: a, members: [], newest: 0 };
+        map.set(key, c);
+      }
+      c.anchor.add(a.anchor);
+      c.n++;
+      c.counts[a.state]++;
+      c.members.push(a);
+      c.newest = Math.max(c.newest, a.since);
+      if (PRIORITY[a.state] < PRIORITY[c.top.state]) c.top = a;
+      if (a.etaMin !== undefined) c.minEta = Math.min(c.minEta ?? Infinity, a.etaMin);
+    }
+    for (const c of map.values()) {
+      c.anchor.divideScalar(c.n);
+      c.dist = Math.hypot(c.anchor.x - focus.x, c.anchor.z - focus.z);
+    }
+    return map;
+  }
+
+  /** 每帧调用：分组、筛选、更新气泡 */
   update() {
     if (!this.visible) return;
     const rect = this.canvas.getBoundingClientRect();
@@ -98,78 +161,126 @@ export class HomeAlerts {
     s.height = `${rect.height}px`;
 
     const cam = this.camera.position;
-    const range = Math.max(this.minRange, this.rangeFactor * Math.max(0, cam.y - this.groundAt(cam.x, cam.z)));
-    const map = new Map<string, Cluster>();
-    for (const a of this.items) {
-      const dist = a.anchor.distanceTo(cam);
-      if (dist > range) continue;
-      this.v.copy(a.anchor).project(this.camera);
-      if (this.v.z > 1 || this.v.z < -1) continue;
-      const x = ((this.v.x + 1) / 2) * rect.width;
-      const y = ((1 - this.v.y) / 2) * rect.height;
-      if (x < -20 || y < -20 || x > rect.width + 20 || y > rect.height + 20) continue;
-      const key = `${Math.floor(x / CELL_PX)},${Math.floor(y / CELL_PX)}`;
-      let c = map.get(key);
-      if (!c) {
-        c = { key, x: 0, y: 0, n: 0, dist, counts: { burning: 0, burned: 0, threat: 0 }, top: a, members: [], newest: 0 };
-        map.set(key, c);
-      }
-      c.x += x;
-      c.y += y;
-      c.n++;
-      c.dist = Math.min(c.dist, dist);
-      c.counts[a.state]++;
-      c.members.push(a);
-      c.newest = Math.max(c.newest, a.since);
-      if (PRIORITY[a.state] < PRIORITY[c.top.state]) c.top = a;
-      if (a.etaMin !== undefined) c.minEta = Math.min(c.minEta ?? Infinity, a.etaMin);
-    }
-    // 最紧急的先放；与已放置的气泡过近时并入它，避免重叠。超过上限时舍弃最不紧急的
-    const placed: Cluster[] = [];
-    for (const c of [...map.values()].sort((a, b) => PRIORITY[a.top.state] - PRIORITY[b.top.state] || b.n - a.n)) {
-      c.x /= c.n;
-      c.y /= c.n;
-      const host = placed.find((p) => Math.hypot(p.x - c.x, p.y - c.y) < MERGE_PX);
-      if (!host) {
-        placed.push(c);
-        continue;
-      }
-      host.n += c.n;
-      host.dist = Math.min(host.dist, c.dist);
-      for (const s of ["burning", "burned", "threat"] as HomeState[]) host.counts[s] += c.counts[s];
-      host.members.push(...c.members);
-      host.newest = Math.max(host.newest, c.newest);
-      if (c.minEta !== undefined) host.minEta = Math.min(host.minEta ?? Infinity, c.minEta);
-    }
-    // 数量上限：按紧急程度、再按离相机的距离排序，只取前 maxVisible 个
-    placed.sort((a, b) => PRIORITY[a.top.state] - PRIORITY[b.top.state] || a.dist - b.dist);
-    this.clusters = placed.slice(0, Math.min(this.maxVisible, MAX_BUBBLES));
-    const count = `${this.clusters.length}/${placed.length}`;
+    const focus = this.focus();
+    // 高度取相机相对焦点处地面：绕焦点旋转时不随相机下方的地形起伏变化
+    const height = Math.max(0, cam.y - this.groundAt(focus.x, focus.z));
+    const range = Math.max(this.minRange, this.rangeFactor * height);
+    // 已在显示的组：范围放宽 10%，排序距离按 85% 计（滞后）
+    const showing = (c: Cluster) => {
+      const b = this.bubbles.get(c.key);
+      return !!b && b.dyingAt === null;
+    };
+    const rank = (c: Cluster) => (showing(c) ? c.dist * 0.85 : c.dist);
+    const inRange = [...this.cluster(focus, height).values()]
+      .filter((c) => c.dist <= (showing(c) ? range * 1.1 : range))
+      .sort((a, b) => PRIORITY[a.top.state] - PRIORITY[b.top.state] || rank(a) - rank(b));
+    const shown = inRange.slice(0, Math.min(this.maxVisible, MAX_BUBBLES));
+    const count = `${shown.length}/${inRange.length}`;
     if (count !== this.lastCount) {
       this.lastCount = count;
-      this.onCount?.(this.clusters.length, placed.length);
+      this.onCount?.(shown.length, inRange.length);
     }
 
     const now = performance.now();
-    this.clusters.forEach((c, i) => {
-      const el = this.pool[i] ?? this.create(i);
-      el.hidden = false;
-      const { x, y } = c;
+    const placed: [number, number][] = [];
+    const live = new Set<string>();
+    shown.forEach((c, i) => {
+      live.add(c.key);
+      const b = this.bubbles.get(c.key) ?? this.acquire(c.key, now);
+      b.cluster = c;
+      b.anchor.copy(c.anchor);
+      if (b.dyingAt !== null) {
+        b.dyingAt = null;
+        b.el.style.pointerEvents = "";
+      }
+      const p = this.toScreen(c.anchor, rect);
+      if (!p) {
+        b.el.hidden = true;
+        return;
+      }
+      b.el.hidden = false;
+      // 与已放置的更紧急气泡重叠时调淡（排序保证先放的更紧急或更近）
+      const covered = placed.some(([x, y]) => Math.hypot(x - p[0], y - p[1]) < OVERLAP_PX);
+      placed.push(p);
       const t = (now - c.newest) / POP_MS;
       const pop = this.reduced || t >= 1 ? 1 : popCurve(t);
-      el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%) scale(${pop.toFixed(3)})`;
-      el.style.zIndex = String(MAX_BUBBLES - i);
-      // 接近距离上限时淡出
-      el.style.opacity = String(1 - 0.85 * smoothstep(range * 0.75, range, c.dist));
+      b.el.style.transform = `translate(${p[0].toFixed(1)}px, ${p[1].toFixed(1)}px) translate(-50%, -100%) scale(${pop.toFixed(3)})`;
+      b.el.style.zIndex = String(MAX_BUBBLES - i);
+      b.el.classList.toggle("covered", covered);
+      // 新元素第一帧保持透明，下一帧才设目标透明度，CSS 过渡才会淡入
+      const fade = 1 - 0.85 * smoothstep(range * 0.75, range, c.dist);
+      b.el.style.opacity = now === b.bornAt ? "0" : String(covered ? fade * 0.2 : fade);
       const sig = `${c.top.state}|${c.n}|${c.counts.burning}|${c.counts.threat}|${c.counts.burned}|${c.minEta === undefined ? "" : Math.round(c.minEta / 5)}`;
-      if (el.dataset.sig !== sig) {
-        el.dataset.sig = sig;
-        el.className = `alert-bubble ${c.top.state}${c.n > 1 ? " cluster" : ""}`;
-        el.innerHTML = this.content(c);
-        el.setAttribute("aria-label", this.label(c));
+      if (b.el.dataset.sig !== sig) {
+        b.el.dataset.sig = sig;
+        b.el.className = `alert-bubble ${c.top.state}${c.n > 1 ? " cluster" : ""}${covered ? " covered" : ""}`;
+        b.el.innerHTML = this.content(c);
+        b.el.setAttribute("aria-label", this.label(c));
       }
     });
-    for (let i = this.clusters.length; i < this.pool.length; i++) this.pool[i].hidden = true;
+
+    // 不再显示的组：原地淡出后回收
+    for (const [key, b] of this.bubbles) {
+      if (live.has(key)) continue;
+      if (b.dyingAt === null) {
+        b.dyingAt = now;
+        b.el.style.opacity = "0";
+        b.el.style.pointerEvents = "none";
+      }
+      const p = this.toScreen(b.anchor, rect);
+      if (p) b.el.style.transform = `translate(${p[0].toFixed(1)}px, ${p[1].toFixed(1)}px) translate(-50%, -100%)`;
+      if (this.reduced || now - b.dyingAt > FADE_MS + 40) this.release(key, b);
+    }
+  }
+
+  private toScreen(anchor: THREE.Vector3, rect: DOMRect): [number, number] | null {
+    this.v.copy(anchor).project(this.camera);
+    if (this.v.z > 1 || this.v.z < -1) return null;
+    const x = ((this.v.x + 1) / 2) * rect.width;
+    const y = ((1 - this.v.y) / 2) * rect.height;
+    if (x < -40 || y < -40 || x > rect.width + 40 || y > rect.height + 40) return null;
+    return [x, y];
+  }
+
+  private acquire(key: string, now: number): Bubble {
+    const el = this.free.pop() ?? this.createElement();
+    el.hidden = false;
+    el.dataset.sig = "";
+    el.style.opacity = "0";
+    el.style.pointerEvents = "";
+    const b: Bubble = { el, cluster: null, anchor: new THREE.Vector3(), bornAt: now, dyingAt: null };
+    (el as HTMLButtonElement & { bubble?: Bubble }).bubble = b;
+    this.bubbles.set(key, b);
+    return b;
+  }
+
+  private release(key: string, b: Bubble) {
+    b.el.hidden = true;
+    b.cluster = null;
+    this.bubbles.delete(key);
+    this.free.push(b.el);
+  }
+
+  private createElement(): HTMLButtonElement {
+    const el = document.createElement("button") as HTMLButtonElement & { bubble?: Bubble };
+    el.type = "button";
+    el.className = "alert-bubble";
+    el.addEventListener("pointerenter", () => {
+      const c = el.bubble?.cluster;
+      if (!c) return;
+      const r = el.getBoundingClientRect();
+      const { title, rows } = c.n === 1 ? this.describe(c.top) : this.clusterCard(c);
+      this.handlers.onHover(title, rows, r.right + 6, r.top);
+    });
+    el.addEventListener("pointerleave", () => this.handlers.onLeave());
+    el.addEventListener("click", () => {
+      const c = el.bubble?.cluster;
+      if (!c) return;
+      const spread = Math.max(...c.members.map((m) => m.anchor.distanceTo(c.anchor)));
+      this.handlers.onFly(c.anchor.clone(), c.n === 1 ? 260 : Math.max(450, spread * 2.6));
+    });
+    this.root.appendChild(el);
+    return el;
   }
 
   private content(c: Cluster): string {
@@ -188,30 +299,6 @@ export class HomeAlerts {
       .filter((s) => c.counts[s] > 0)
       .map((s) => `${c.counts[s]} ${c.counts[s] === 1 ? "home" : "homes"} ${names[s]}`)
       .join(", ");
-  }
-
-  private create(i: number): HTMLButtonElement {
-    const el = document.createElement("button");
-    el.type = "button";
-    el.className = "alert-bubble";
-    el.addEventListener("pointerenter", () => {
-      const c = this.clusters[i];
-      if (!c) return;
-      const r = el.getBoundingClientRect();
-      const { title, rows } = c.n === 1 ? this.describe(c.top) : this.clusterCard(c);
-      this.handlers.onHover(title, rows, r.right + 6, r.top);
-    });
-    el.addEventListener("pointerleave", () => this.handlers.onLeave());
-    el.addEventListener("click", () => {
-      const c = this.clusters[i];
-      if (!c) return;
-      const center = c.members.reduce((acc, m) => acc.add(m.anchor), new THREE.Vector3()).divideScalar(c.members.length);
-      const spread = Math.max(...c.members.map((m) => m.anchor.distanceTo(center)));
-      this.handlers.onFly(center, c.n === 1 ? 260 : Math.max(450, spread * 2.6));
-    });
-    this.root.appendChild(el);
-    this.pool[i] = el;
-    return el;
   }
 
   private clusterCard(c: Cluster): { title: string; rows: [string, string][] } {

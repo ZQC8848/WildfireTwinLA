@@ -516,6 +516,13 @@ const homeAlerts = new HomeAlerts(
   },
   describeHome,
   groundAt,
+  // 画面焦点：轨道模式下是旋转中心；飞行模式下取视线前方（典型观察距离处）的地面点
+  () => {
+    if (!fly.enabled) return ctx.controls.target;
+    const dir = ctx.camera.getWorldDirection(new THREE.Vector3());
+    const h = Math.max(50, ctx.camera.position.y - groundAt(ctx.camera.position.x, ctx.camera.position.z));
+    return ctx.camera.position.clone().addScaledVector(dir.setY(0).normalize(), h * 1.6);
+  },
   (shown, total) => shell.setAlertCount(shown, total),
 );
 
