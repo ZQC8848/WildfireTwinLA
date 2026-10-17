@@ -101,7 +101,7 @@ Use the real city names. Give each one an `approx: true` property, or put "appro
   - `official_order` events for SJC04, SJC05, SJC10, SCL12 and SCL13. Use the issue times from OCFA / City posts where you can find them, and state the source in each event. The frontend shows them as "Official".
   - The final `incident` event with `perimeterCells`, as the last event. Use the WFIGS perimeter once it is published; until then, use a dNBR burn scar from the first clear post-fire Sentinel-2 scene, labelled as such.
 - **Static heat-source filter.** Drop detections within 750 m of the landfill point (33.4905, −117.6185) that occur outside the fire. Better, drop any pixel that also fired on several nights before 10-16. Apply the same filter in the live poller.
-- Pacing: `offsetSeconds` only sets the pace of the playback; the frontend advances the simulation to each event's `t`. Use about 1 replay second per 5 real minutes, so the afternoon of 10-16 plays in under a minute.
+- Pacing: set `offsetSeconds = (t − ignition) / 5 minutes`, exactly **1 replay second per 5 real minutes**. The frontend runs the simulation on a replay clock built on this rule (`web/src/net/replayClock.ts`), so hotspots and wind land at the right simulation time. The server divides offsets by `speed` as it does now.
 - Server: accept `event=norte` in `/ws?mode=replay` (the check at `server/app/main.py:232` currently only allows `eaton`). Make `norte` the default.
 - Acceptance: the replay plays end to end against the real grid. The two ignitions land on the right streets, and the VIIRS pixels land on the burned hillside, not on the landfill.
 
@@ -144,6 +144,18 @@ Issue #6 (WindNinja library) still applies, now for the new bbox. Issue #11 (Eat
 **C4. When the perimeter exists:** compute the final IoU and the arrival-time error map for the replay run, and add them to `analysis/norte-validation.json`.
 
 ### A: Qinchuan (frontend), for reference
+
+Done on `a/norte-frontend`:
+
+- The UI says Norte and requests `event=norte`.
+- Until `server/data/norte-replay.jsonl` exists, the frontend builds the same event stream in the browser from `data/norte/raw/` (`web/src/net/norteSeed.ts`): both reported ignitions, four VIIRS passes with the landfill filtered out, and hourly HRRR. It switches to Tia's file automatically once that file is on main.
+- The replay clock described in B3, and a pause at the end of the replay.
+- Satellite vs model comparison. Before each pass is assimilated, it checks whether the model had already burned within 200 m of each pixel. Missed pixels turn blue. The panel shows "pixels the model had reached" and "model fire near a detection".
+- Timeline ticks for satellite passes (blue) and reported ignitions (white).
+- Plan defaults to the NORTE ignition and 8.5 m/s from 75°.
+- The synthetic `?mock` grid is placed on the Norte bbox, so replay hotspots land on it before the real grid exists.
+
+Still to do: the reported-damage layer (needs B6), "approximate" labels on communities (needs B2), and checking everything on the real grid.
 
 - Rename Eaton to Norte in the UI and request `event=norte`. The bundled local replay switches to `norte-replay.jsonl`.
 - Make the Plan default scenario NORTE plus the 10-16 wind.

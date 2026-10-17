@@ -73,6 +73,10 @@ uniform bool uHasTreat;
 uniform vec3 uRetardant;
 uniform sampler2D uPerimeter; // 官方火界（R > 0 为火界内），只画轮廓作为对照
 uniform bool uHasPerimeter;
+uniform sampler2D uForecast; // 集合预报统计（降采样网格）：R 燃烧概率，B 中位数着火时刻（距预报起点的分钟，-1 为未过半）
+uniform bool uHasForecast;
+uniform vec2 uForecastSize;
+uniform float uForecastScale; // 每个预报格对应的网格格数
 uniform float uStepMinutes; // 每步分钟数
 uniform sampler2D uState; // 火势模拟状态：R = 0 未燃 / 1 燃烧中 / 2 已燃尽
 uniform bool uUseState;
@@ -257,6 +261,7 @@ void main() {
 
   // 火势状态：燃尽为灰黑，燃烧处发光。双线性混合四个格子，火场边缘不出现方格锯齿
   float burnGlow = 0.0;
+  float fireCover = 0.0; // 当前火场（含燃尽）覆盖度，预报图层不画在已烧的地方
   if (uUseState) {
     // 用着火时刻（状态纹理 B 通道）的等值线画火线，代替逐格混合，火场边缘是平滑而不规则的曲线。
     // 两套插值：front 决定"火线在哪里"，已烧格的到达时间钳在当前时间 2 步以内，
@@ -284,6 +289,7 @@ void main() {
     float edge = T - front + wobble;
     float aa = fwidth(edge) * 0.75 + 1e-3;
     float inside = smoothstep(-aa, aa, edge) * (1.0 - max(water, road));
+    fireCover = inside;
     float age = max(T - arr + wobble, 0.0);
     // 燃烧持续时间与模拟规则一致：植被 2 + 3×燃料 步，建筑 8 步
     float dur = mix((2.0 + 3.0 * fuel) * S, 8.0 * S, vb.y);
@@ -353,6 +359,35 @@ void main() {
     float halo = 1.0 - smoothstep(fw * 2.2, fw * 4.0, d);
     col = mix(col, vec3(0.05), halo * 0.6);
     col = mix(col, vec3(0.93, 0.95, 0.92), line);
+  }
+
+  // 集合预报：燃烧概率画成半透明的暖红色（概率越高越浓），中位数到达时间每小时一条等时线
+  if (uHasForecast) {
+    vec2 p = vCell / uForecastScale - 0.5;
+    vec2 f = fract(p);
+    ivec2 c0 = ivec2(floor(p));
+    ivec2 hi = ivec2(uForecastSize) - 1;
+    float prob = 0.0;
+    float med = 0.0;
+    float valid = 0.0;
+    for (int j = 0; j < 2; j++) {
+      for (int i = 0; i < 2; i++) {
+        vec4 v = texelFetch(uForecast, clamp(c0 + ivec2(i, j), ivec2(0), hi), 0);
+        float wgt = (i == 1 ? f.x : 1.0 - f.x) * (j == 1 ? f.y : 1.0 - f.y);
+        prob += wgt * v.r;
+        med += wgt * max(v.b, 0.0);
+        valid += wgt * step(0.0, v.b);
+      }
+    }
+    float open = (1.0 - fireCover) * (1.0 - water);
+    float shade = smoothstep(0.03, 0.12, prob) * (0.1 + 0.32 * prob) * open;
+    vec3 heat = mix(vec3(0.95, 0.66, 0.3), vec3(0.82, 0.2, 0.12), smoothstep(0.2, 0.9, prob));
+    col = mix(col, heat * mix(1.0, 0.8, uNight), shade);
+    // 等时线只画在一半以上成员都烧到的区域内（四个角都有中位数，插值才有意义）
+    float hours = med / 60.0;
+    float dh = abs(fract(hours + 0.5) - 0.5);
+    float line = (1.0 - smoothstep(0.4, 1.1, dh / max(fwidth(hours), 1e-4))) * step(0.999, valid) * step(0.25, hours) * open;
+    col = mix(col, vec3(0.98, 0.92, 0.84), line * 0.6);
   }
 
   // 悬停格子描边
@@ -436,6 +471,10 @@ export class Terrain {
           uRetardant: { value: new THREE.Color("#D63A73") },
           uPerimeter: { value: null },
           uHasPerimeter: { value: false },
+          uForecast: { value: null },
+          uHasForecast: { value: false },
+          uForecastSize: { value: new THREE.Vector2(1, 1) },
+          uForecastScale: { value: 2 },
           uStepMinutes: { value: 5 },
           uState: { value: null },
           uUseState: { value: false },
@@ -509,6 +548,15 @@ export class Terrain {
     tex.needsUpdate = true;
     this.uniforms.uPerimeter.value = tex;
     this.uniforms.uHasPerimeter.value = true;
+  }
+
+  /** 显示集合预报（texture 为统计纹理，size 为其边长，scale 为每个预报格对应的网格格数）；传 null 隐藏 */
+  setForecast(texture: THREE.Texture | null, size = 1, scale = 2) {
+    this.uniforms.uHasForecast.value = !!texture;
+    if (!texture) return;
+    this.uniforms.uForecast.value = texture;
+    this.uniforms.uForecastSize.value.set(size, size);
+    this.uniforms.uForecastScale.value = scale;
   }
 
   setSatellite(tex: THREE.Texture) {

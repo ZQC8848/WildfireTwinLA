@@ -1,11 +1,22 @@
 // 数据源客户端：
 // - live：连接后端 WS /ws?mode=live，断线后按指数退避重连，定时发送 ping
-// - replay：连接 /ws?mode=replay&event=eaton；后端连不上时，改为在浏览器内按同样的时间间隔播放
-//   仓库里的 server/data/eaton-replay.jsonl（与后端读取的是同一份文件），演示不依赖后端
+// - replay：连接 /ws?mode=replay&event=norte；后端连不上时，改为在浏览器内按同样的时间间隔播放。
+//   本地回放优先用后端的 server/data/norte-replay.jsonl（与后端读取的是同一份文件）；
+//   该文件还没生成时，用 data/norte/raw/ 的存档数据现场拼出（norteSeed.ts），演示不依赖后端
 
 import type { GridMeta } from "@core";
-import replaySeed from "../../../server/data/eaton-replay.jsonl?raw";
 import { normalize, type FeedEvent } from "./messages";
+import { buildNorteReplay } from "./norteSeed";
+
+// 文件不存在时 glob 为空，不会让构建失败
+const replayFiles = import.meta.glob<string>("../../../server/data/norte-replay.jsonl", { query: "?raw", import: "default", eager: true });
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function localReplay(): { events: any[]; bundled: boolean } {
+  const text = Object.values(replayFiles)[0];
+  if (text) return { events: text.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l)), bundled: false };
+  return { events: buildNorteReplay(), bundled: true };
+}
 
 export type FeedMode = "off" | "live" | "replay";
 export type FeedState = "idle" | "connecting" | "connected" | "local" | "retrying" | "ended";
@@ -21,6 +32,8 @@ export class FeedClient {
   private timers: number[] = [];
   private retry = 0;
   private generation = 0;
+  /** 本次回放是否在浏览器内播放，以及是否由存档原始数据拼出 */
+  local: { bundled: boolean } | null = null;
 
   constructor(
     private meta: GridMeta,
@@ -33,6 +46,7 @@ export class FeedClient {
   start(mode: FeedMode) {
     this.stop();
     this.mode = mode;
+    this.local = null;
     if (mode === "off") return this.setState("idle", "");
     this.open();
   }
@@ -56,13 +70,14 @@ export class FeedClient {
 
   private wsUrl(): string {
     const base = API.replace(/^http/, "ws");
-    return this.mode === "live" ? `${base}/ws?mode=live` : `${base}/ws?mode=replay&event=eaton&speed=${this.replaySpeed}`;
+    return this.mode === "live" ? `${base}/ws?mode=live` : `${base}/ws?mode=replay&event=norte&speed=${this.replaySpeed}`;
   }
 
   private open() {
     const gen = this.generation;
     this.setState("connecting", API);
     let opened = false;
+    let received = 0;
     let ws: WebSocket;
     try {
       ws = new WebSocket(this.wsUrl());
@@ -81,7 +96,10 @@ export class FeedClient {
       if (gen !== this.generation || typeof m.data !== "string" || m.data === "pong") return;
       try {
         const e = normalize(JSON.parse(m.data), this.meta);
-        if (e) this.onEvent(e);
+        if (e) {
+          received++;
+          this.onEvent(e);
+        }
       } catch {
         /* 忽略无法解析的消息 */
       }
@@ -89,7 +107,9 @@ export class FeedClient {
     ws.onclose = () => {
       if (gen !== this.generation) return;
       this.ws = null;
-      if (this.mode === "replay" && opened) return this.setState("ended", "Replay finished");
+      // 后端接受了连接却没有发任何事件（例如还没有这份回放）：改为本地播放
+      if (this.mode === "replay" && opened && received > 0) return this.setState("ended", "Replay finished");
+      if (this.mode === "replay") return this.playLocal(gen);
       this.fail(gen, opened);
     };
   }
@@ -115,12 +135,10 @@ export class FeedClient {
 
   /** 后端不可用时在浏览器内播放回放文件 */
   private playLocal(gen: number) {
-    this.setState("local", "Server unavailable; playing the bundled replay");
-    const lines = replaySeed
-      .split("\n")
-      .filter((l) => l.trim())
-      .map((l) => JSON.parse(l))
-      .sort((a, b) => (a.offsetSeconds ?? 0) - (b.offsetSeconds ?? 0));
+    const { events, bundled } = localReplay();
+    this.local = { bundled };
+    this.setState("local", bundled ? "Playing the replay built from archived public data (backend replay not available)." : "Server unavailable; playing the bundled replay.");
+    const lines = [...events].sort((a, b) => (a.offsetSeconds ?? 0) - (b.offsetSeconds ?? 0));
     let last = 0;
     for (const raw of lines) {
       const at = ((raw.offsetSeconds ?? 0) * 1000) / Math.max(0.1, this.replaySpeed);

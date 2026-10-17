@@ -27,6 +27,8 @@ import { RealtimeController } from "./realtime/controller";
 import { Bloom } from "./scene/post";
 import { CameraRig } from "./scene/cameraRig";
 import { cellXY } from "@core";
+import { NORTE_SCENARIO, norteIgnitionCells } from "./data/norte";
+import { ENSEMBLE_FACTOR, ENSEMBLE_MEMBERS, Ensemble, communityOutlook, type CommunityOutlook, type EnsembleResult } from "./sim/ensemble";
 
 const q = new URLSearchParams(location.search);
 const debug = q.has("debug");
@@ -71,8 +73,9 @@ ctx.scene.add(wires.object);
 const simParams = {
   running: false,
   stepsPerSecond: 20,
-  windSpeed: 8,
-  windFrom: 45,
+  // Plan 默认情景：Norte Fire 当天中午的 HRRR 风
+  windSpeed: NORTE_SCENARIO.windSpeed,
+  windFrom: NORTE_SCENARIO.windFrom,
   windMode: "terrain" as WindMode,
   showWind: false,
   spotting: true,
@@ -91,6 +94,36 @@ ctx.scene.add(smoke.object);
 const windLayer = new WindLayer(grid, terrain.minElev, terrain.verticalScale);
 ctx.scene.add(windLayer.object);
 const monitor = new FireMonitor(grid, bundle.communities, bundle.buildings);
+
+// ---- 集合预报（P3） ----
+const ensemble = new Ensemble(ctx.renderer, grid);
+let forecast: EnsembleResult | null = null;
+let outlook: CommunityOutlook[] | null = null;
+let forecastShown = true;
+/** 预报显示时，模拟每推进这么久就自动重算一次 */
+const FORECAST_REFRESH_MIN = 60;
+function runForecast() {
+  if (!simActive) return;
+  forecast = ensemble.run(sim.texture, sim.minutes, currentWind, sim.treatMask);
+  outlook = communityOutlook(forecast, bundle.communities, meta.width, ensemble.size);
+  showForecast();
+  shell.setForecast(
+    true,
+    `From T + ${formatMinutes(forecast.startMinutes)}: ${ENSEMBLE_MEMBERS} runs × ${forecast.steps} steps on a ${ensemble.size} × ${ensemble.size} grid (${ensemble.grid.meta.cellSize} m) in ${Math.round(forecast.ms)} ms on the GPU. Updates every simulated hour while shown.`,
+    outlook,
+  );
+}
+function showForecast() {
+  // 回看过去时隐藏：预报属于它的起点之后
+  const visible = forecastShown && !!forecast && (viewMinutes === null || viewMinutes >= forecast.startMinutes);
+  terrain.setForecast(visible ? forecast!.texture : null, ensemble.size, ENSEMBLE_FACTOR);
+}
+function clearForecast() {
+  forecast = null;
+  outlook = null;
+  terrain.setForecast(null);
+  shell.setForecast(false, "64 fire simulations from the current fire, each with the wind direction varied up to ±15° and the speed up to ±20%.", null);
+}
 
 // ---- Bloom 与相机预设 ----
 const bloom = new Bloom(ctx);
@@ -151,6 +184,7 @@ let smokeEnabled = true;
 function goLive() {
   viewMinutes = null;
   smoke.object.visible = smokeEnabled;
+  if (forecast) showForecast();
 }
 
 // 实时数据推送的 5×5 风场：均匀风模式下直接使用；地形风模式下取其平均作为来流
@@ -220,6 +254,7 @@ const shell = new Shell(
       simParams.running = false;
       shell.setRunning(false);
       smoke.object.visible = smokeEnabled && viewMinutes === null;
+      showForecast();
       refreshPanels();
     },
     onView: (view) => flyToView(view),
@@ -227,13 +262,18 @@ const shell = new Shell(
       goLive();
       refreshPanels();
     },
+    onForecast: () => runForecast(),
+    onShowForecast: (show) => {
+      forecastShown = show;
+      showForecast();
+    },
     onShowWind: (show) => {
       simParams.showWind = show;
       windLayer.object.visible = show;
     },
   },
   {
-    areaLabel: "Altadena foothills",
+    areaLabel: bundle.source === "real" ? "San Juan Capistrano and San Clemente" : "Norte Fire area, synthetic terrain",
     windDir: simParams.windFrom,
     windSpeed: simParams.windSpeed,
     stepsPerSecond: simParams.stepsPerSecond,
@@ -261,7 +301,7 @@ window.dispatchEvent(new Event("resize"));
     ["Dense chaparral", `${Math.round((dense / Math.max(1, veg)) * 100)}% of vegetation`],
     ["Homes", bundle.buildings.length.toLocaleString("en-US")],
     ["Communities", String(bundle.communities.length)],
-    ["Data", bundle.source === "mock" ? "Synthetic test grid" : "Sentinel-2 and USGS"],
+    ["Data", bundle.source === "mock" ? "Synthetic test grid" : "Sentinel-2, USGS 3DEP and OSM"],
   ]);
 }
 
@@ -273,6 +313,7 @@ const resetSim = () => {
   frontSpeed = 0;
   smoke.clear();
   monitor.reset();
+  clearForecast();
   simParams.running = false;
   shell.setRunning(false);
 };
@@ -327,6 +368,7 @@ const planner: PlannerController = new PlannerController({
   inflow,
   windField: () => currentWind,
   ignitions: () => testIgnitions,
+  scenario: () => ({ cells: norteIgnitionCells(meta), label: NORTE_SCENARIO.label }),
 });
 
 // ---- 实时数据与回放（P5） ----
@@ -347,7 +389,7 @@ const realtime: RealtimeController = new RealtimeController({
   },
   setFeedWind: (mean, field) => {
     feedField = field;
-    simParams.windSpeed = Math.round(mean.speedMs);
+    simParams.windSpeed = Math.round(mean.speedMs * 2) / 2;
     simParams.windFrom = Math.round(mean.dirFromDeg);
     shell.setWind(simParams.windFrom, simParams.windSpeed);
     applyWind();
@@ -399,7 +441,8 @@ ctx.onFrame(() => {
 let downAt: [number, number] | null = null;
 ctx.renderer.domElement.addEventListener("pointerdown", (e) => (downAt = [e.clientX, e.clientY]));
 ctx.renderer.domElement.addEventListener("pointerup", (e) => {
-  if (!downAt || planner.isPainting) return;
+  // 点火只在 Plan 模式下可用；Respond 模式的火只来自实时数据或回放
+  if (!downAt || planner.isPainting || shell.mode === "respond") return;
   const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
   downAt = null;
   if (moved > 4) return;
@@ -454,10 +497,17 @@ ctx.onFrame((dt) => {
     applyNight(night);
   }
   if (simActive && simParams.running) {
-    stepAcc += dt * simParams.stepsPerSecond;
-    const n = Math.min(8, Math.floor(stepAcc));
-    stepAcc -= n;
-    if (n > 0) sim.advance(n);
+    // 回放中模拟跟着回放时钟走，火点和风才会落在正确的模拟时刻；其余情况按速度档推进
+    const replayAt = realtime.replayMinutes();
+    if (replayAt !== null) {
+      const n = Math.min(8, Math.floor((replayAt - sim.minutes) / SpreadParams.stepMinutes));
+      if (n > 0) sim.advance(n);
+    } else {
+      stepAcc += dt * simParams.stepsPerSecond;
+      const n = Math.min(8, Math.floor(stepAcc));
+      stepAcc -= n;
+      if (n > 0) sim.advance(n);
+    }
   }
   // 每步之后状态纹理会换成另一张，所以每帧都重新指向当前那张
   propMaterial.uniforms.uState.value = sim.texture;
@@ -496,10 +546,14 @@ function refreshPanels() {
     simActive ? sim.minutes : null,
     viewMinutes ?? sim.minutes,
     viewMinutes === null,
-    monitor.events.map((e) => ({ minutes: e.minutes, level: e.level })),
+    [...monitor.events.map((e) => ({ minutes: e.minutes, level: e.level })), ...realtime.ticks()],
   );
   const reached = monitor.communities.filter((c) => c.level === "reached").length;
   const fs = simActive ? sim.stats() : null;
+  // 预报：有火时可以运行；显示中且模拟已推进一小时以上时自动重算
+  const fireNow = !!fs && fs.burningCells > 0;
+  if (forecast && forecastShown && fireNow && viewMinutes === null && sim.minutes - forecast.startMinutes >= FORECAST_REFRESH_MIN) runForecast();
+  else shell.setForecast(fireNow, null, outlook);
   shell.setPlanFire(
     fs
       ? [
@@ -513,14 +567,20 @@ function refreshPanels() {
   );
   const feedRows: [string, string][] = [];
   if (realtime.mode !== "off") {
+    const ag = realtime.agreement();
     feedRows.push(["Satellite hotspots", realtime.hotspotsReceived.toLocaleString("en-US")]);
+    if (ag) {
+      feedRows.push(["Satellite passes", String(realtime.passes.length)]);
+      feedRows.push(["Pixels the model had reached", `${ag.reached} of ${ag.pixels} (${Math.round((ag.reached / ag.pixels) * 100)}%)`]);
+      feedRows.push(["Model fire near a detection", `${Math.round(ag.confirmedShare * 100)}%`]);
+    }
     if (realtime.perimeter) {
       feedRows.push(["Official perimeter", `${Math.round(realtime.perimeterHa).toLocaleString("en-US")} ha`]);
       const iou = realtime.perimeterMatch(sim.lastState);
       if (iou !== null) feedRows.push(["Overlap with simulation", `${Math.round(iou * 100)}%`]);
     }
   }
-  shell.setFeed(realtime.mode, realtime.status, feedRows);
+  shell.setFeed(realtime.mode, realtime.status, feedRows, realtime.bundledReplay);
   shell.setCalls(realtime.callTally());
   shell.setRespond(simActive ? monitor.closest() : null, monitor.communities, { affected: monitor.homesAffected, total: monitor.totalHomes }, monitor.events);
   if (debug) {
@@ -585,6 +645,31 @@ function runCpuCheck(steps = 80) {
   return { gpuCells: a, cpuCells: b, iou, tGpu, tCpu };
 }
 
+/** P3 benchmark：同一个起始火场，GPU 一次跑 64 个成员，对比 CPU 参考实现逐个串行运行（取 cpuRuns 次外推到 64） */
+function runBench(cpuRuns = 4) {
+  if (!simActive) return null;
+  const state = sim.statsSync() && sim.lastState!;
+  ensemble.run(sim.texture, sim.minutes, currentWind, sim.treatMask); // 预热：编译 shader、分配显存
+  const gpu = [0, 1, 2].map(() => ensemble.run(sim.texture, sim.minutes, currentWind, sim.treatMask).ms).sort((a, b) => a - b)[1];
+  const g = ensemble.grid.meta;
+  const cells = new Set<number>();
+  for (let c = 0; c < meta.width * meta.height; c++) {
+    const r = state[c * 4];
+    if (r > 0.5 && r < 1.5) cells.add(Math.floor(Math.floor(c / meta.width) / ENSEMBLE_FACTOR) * g.width + Math.floor((c % meta.width) / ENSEMBLE_FACTOR));
+  }
+  const steps = forecast?.steps ?? 48;
+  const t0 = performance.now();
+  for (let k = 0; k < cpuRuns; k++) {
+    const cpu = new CpuFireSim(ensemble.grid, currentWind, { seed: k + 1, spotting: true });
+    cpu.ignite([...cells]);
+    cpu.advance(steps);
+  }
+  const cpuPerRun = (performance.now() - t0) / cpuRuns;
+  const result = { members: ENSEMBLE_MEMBERS, steps, grid: `${g.width}x${g.height}`, gpuMs: Math.round(gpu), cpuMsPerRun: Math.round(cpuPerRun), cpuMsFor64: Math.round(cpuPerRun * ENSEMBLE_MEMBERS), speedup: +((cpuPerRun * ENSEMBLE_MEMBERS) / gpu).toFixed(1) };
+  console.info("[bench]", result);
+  return result;
+}
+
 if (debug) {
   const gui = new GUI({ title: "Debug" });
   const params = { verticalScale: terrain.verticalScale, contours: false, contourStep: 50 };
@@ -616,6 +701,7 @@ if (debug) {
   fSim.add(simParams, "spotting").name("Spotting (embers)").onChange((v: boolean) => (sim.spotting = v));
   fSim.add(simParams, "seed", 1, 999, 1).name("Random seed").onChange((v: number) => (sim.seed = v));
   fSim.add({ check: () => runCpuCheck() }, "check").name("Check against CPU");
+  fSim.add({ bench: () => runBench() }, "bench").name("Benchmark forecast (GPU vs CPU)");
   const smokeParams = { rate: smoke.rate, opacity: smoke.material.uniforms.uOpacity.value as number };
   const fSmoke = gui.addFolder("Smoke");
   fSmoke.add(smokeParams, "rate", 20, 600, 10).name("Particles per second").onChange((v: number) => (smoke.rate = v));
@@ -686,6 +772,9 @@ if (viewQ === "overview" || viewQ === "fire" || viewQ === "community") {
 }
 if (q.has("bloom") && q.get("bloom") === "0") bloom.enabled = false;
 if (q.has("cpucheck")) runCpuCheck(Number(q.get("cpucheck")) || 80);
+// ?forecast 加载后运行一次集合预报；?bench 运行 GPU / CPU 对比（都需要先有火，例如配合 ?ignite）
+if (q.has("forecast")) runForecast();
+if (q.has("bench")) Object.assign(window, { benchResult: runBench(Number(q.get("bench")) || 4) });
 const feedQ = q.get("feed");
 if (feedQ === "live" || feedQ === "replay") realtime.start(feedQ);
 const modeParam = q.get("mode");
@@ -696,4 +785,4 @@ if (modeParam === "respond" || modeParam === "plan") {
 }
 
 // 调试用
-Object.assign(window, { bundle, ctx, terrain, props, layout, sim, smoke, monitor, shell, runCpuCheck, realtime, planner });
+Object.assign(window, { bundle, ctx, terrain, props, layout, sim, smoke, monitor, shell, runCpuCheck, realtime, planner, ensemble, runForecast, runBench, getForecast: () => ({ forecast, outlook }) });

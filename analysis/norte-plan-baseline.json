@@ -1,0 +1,553 @@
+{
+  "status": "blocked-missing-B1-B2; mock pipeline exercised",
+  "source": "MOCK — NOT INCIDENT VALIDATION",
+  "gridMeta": {
+    "width": 128,
+    "height": 128,
+    "cellSize": 100,
+    "crs": "EPSG:32611",
+    "originUTM": [
+      433675,
+      3711650
+    ],
+    "bboxLonLat": [
+      -117.71439345592228,
+      33.42768563166042,
+      -117.57576575248525,
+      33.542412948024506
+    ]
+  },
+  "options": {
+    "wind": {
+      "speedMs": 8.5,
+      "dirFromDeg": 75
+    },
+    "factor": 4,
+    "steps": 96,
+    "seeds": [
+      11,
+      23,
+      37,
+      41,
+      53
+    ],
+    "maxIterations": 8,
+    "stripLength": 5,
+    "wildlandDistanceM": 2500
+  },
+  "spread": {
+    "referenceCellSize": 100,
+    "timeScale": 0.35,
+    "spotting": true
+  },
+  "horizonMinutes": 480,
+  "untreated": {
+    "homesReached": 43,
+    "burnedAreaHa": 10001.8,
+    "rows": [
+      {
+        "seed": 11,
+        "homesReached": 40,
+        "burnedAreaHa": 9898,
+        "groups": {}
+      },
+      {
+        "seed": 23,
+        "homesReached": 37,
+        "burnedAreaHa": 10181,
+        "groups": {}
+      },
+      {
+        "seed": 37,
+        "homesReached": 44,
+        "burnedAreaHa": 9967,
+        "groups": {}
+      },
+      {
+        "seed": 41,
+        "homesReached": 50,
+        "burnedAreaHa": 10249,
+        "groups": {}
+      },
+      {
+        "seed": 53,
+        "homesReached": 44,
+        "burnedAreaHa": 9714,
+        "groups": {}
+      }
+    ]
+  },
+  "budgets": [
+    {
+      "budget": 20000,
+      "greedy": {
+        "noiseHomes": 5,
+        "withinNoise": true,
+        "cost": 19680,
+        "overBudget": false,
+        "treatedHectares": {
+          "break": 0,
+          "burn": 256,
+          "thin": 0,
+          "zone0": 48
+        },
+        "homesProtected": 2.3999999999999986,
+        "perSeedHomesProtected": [
+          -1,
+          12,
+          5,
+          1,
+          -5
+        ],
+        "after": {
+          "homesReached": 40.6,
+          "burnedAreaHa": 9839.4,
+          "rows": [
+            {
+              "seed": 11,
+              "homesReached": 41,
+              "burnedAreaHa": 9861,
+              "groups": {}
+            },
+            {
+              "seed": 23,
+              "homesReached": 25,
+              "burnedAreaHa": 9962,
+              "groups": {}
+            },
+            {
+              "seed": 37,
+              "homesReached": 39,
+              "burnedAreaHa": 9728,
+              "groups": {}
+            },
+            {
+              "seed": 41,
+              "homesReached": 49,
+              "burnedAreaHa": 10023,
+              "groups": {}
+            },
+            {
+              "seed": 53,
+              "homesReached": 49,
+              "burnedAreaHa": 9623,
+              "groups": {}
+            }
+          ]
+        },
+        "diagnostics": {
+          "iterations": 5,
+          "spent": 19680,
+          "stopReason": "no-beneficial-candidate",
+          "evaluatedCandidates": 120
+        },
+        "protection": {
+          "SJC04": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          },
+          "SJC05": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          },
+          "reportedDamageArea": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          }
+        }
+      },
+      "mincut": {
+        "noiseHomes": 5,
+        "withinNoise": true,
+        "cost": 51200,
+        "overBudget": true,
+        "treatedHectares": {
+          "break": 512,
+          "burn": 0,
+          "thin": 0,
+          "zone0": 0
+        },
+        "homesProtected": 0,
+        "perSeedHomesProtected": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "after": {
+          "homesReached": 43,
+          "burnedAreaHa": 3122,
+          "rows": [
+            {
+              "seed": 11,
+              "homesReached": 40,
+              "burnedAreaHa": 4424,
+              "groups": {}
+            },
+            {
+              "seed": 23,
+              "homesReached": 37,
+              "burnedAreaHa": 2889,
+              "groups": {}
+            },
+            {
+              "seed": 37,
+              "homesReached": 44,
+              "burnedAreaHa": 2796,
+              "groups": {}
+            },
+            {
+              "seed": 41,
+              "homesReached": 50,
+              "burnedAreaHa": 2788,
+              "groups": {}
+            },
+            {
+              "seed": 53,
+              "homesReached": 44,
+              "burnedAreaHa": 2713,
+              "groups": {}
+            }
+          ]
+        },
+        "protection": {
+          "SJC04": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          },
+          "SJC05": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          },
+          "reportedDamageArea": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          }
+        }
+      }
+    },
+    {
+      "budget": 40000,
+      "greedy": {
+        "noiseHomes": 5,
+        "withinNoise": true,
+        "cost": 32000,
+        "overBudget": false,
+        "treatedHectares": {
+          "break": 0,
+          "burn": 0,
+          "thin": 0,
+          "zone0": 128
+        },
+        "homesProtected": 0.7999999999999972,
+        "perSeedHomesProtected": [
+          0,
+          4,
+          0,
+          0,
+          0
+        ],
+        "after": {
+          "homesReached": 42.2,
+          "burnedAreaHa": 10000.6,
+          "rows": [
+            {
+              "seed": 11,
+              "homesReached": 40,
+              "burnedAreaHa": 9898,
+              "groups": {}
+            },
+            {
+              "seed": 23,
+              "homesReached": 33,
+              "burnedAreaHa": 10175,
+              "groups": {}
+            },
+            {
+              "seed": 37,
+              "homesReached": 44,
+              "burnedAreaHa": 9967,
+              "groups": {}
+            },
+            {
+              "seed": 41,
+              "homesReached": 50,
+              "burnedAreaHa": 10249,
+              "groups": {}
+            },
+            {
+              "seed": 53,
+              "homesReached": 44,
+              "burnedAreaHa": 9714,
+              "groups": {}
+            }
+          ]
+        },
+        "diagnostics": {
+          "iterations": 8,
+          "spent": 32000,
+          "stopReason": "iteration-limit",
+          "evaluatedCandidates": 192
+        },
+        "protection": {
+          "SJC04": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          },
+          "SJC05": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          },
+          "reportedDamageArea": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          }
+        }
+      },
+      "mincut": {
+        "noiseHomes": 5,
+        "withinNoise": true,
+        "cost": 51200,
+        "overBudget": true,
+        "treatedHectares": {
+          "break": 512,
+          "burn": 0,
+          "thin": 0,
+          "zone0": 0
+        },
+        "homesProtected": 0,
+        "perSeedHomesProtected": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "after": {
+          "homesReached": 43,
+          "burnedAreaHa": 3122,
+          "rows": [
+            {
+              "seed": 11,
+              "homesReached": 40,
+              "burnedAreaHa": 4424,
+              "groups": {}
+            },
+            {
+              "seed": 23,
+              "homesReached": 37,
+              "burnedAreaHa": 2889,
+              "groups": {}
+            },
+            {
+              "seed": 37,
+              "homesReached": 44,
+              "burnedAreaHa": 2796,
+              "groups": {}
+            },
+            {
+              "seed": 41,
+              "homesReached": 50,
+              "burnedAreaHa": 2788,
+              "groups": {}
+            },
+            {
+              "seed": 53,
+              "homesReached": 44,
+              "burnedAreaHa": 2713,
+              "groups": {}
+            }
+          ]
+        },
+        "protection": {
+          "SJC04": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          },
+          "SJC05": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          },
+          "reportedDamageArea": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          }
+        }
+      }
+    },
+    {
+      "budget": 80000,
+      "greedy": {
+        "noiseHomes": 5,
+        "withinNoise": true,
+        "cost": 32000,
+        "overBudget": false,
+        "treatedHectares": {
+          "break": 0,
+          "burn": 0,
+          "thin": 0,
+          "zone0": 128
+        },
+        "homesProtected": 0.7999999999999972,
+        "perSeedHomesProtected": [
+          0,
+          4,
+          0,
+          0,
+          0
+        ],
+        "after": {
+          "homesReached": 42.2,
+          "burnedAreaHa": 10000.6,
+          "rows": [
+            {
+              "seed": 11,
+              "homesReached": 40,
+              "burnedAreaHa": 9898,
+              "groups": {}
+            },
+            {
+              "seed": 23,
+              "homesReached": 33,
+              "burnedAreaHa": 10175,
+              "groups": {}
+            },
+            {
+              "seed": 37,
+              "homesReached": 44,
+              "burnedAreaHa": 9967,
+              "groups": {}
+            },
+            {
+              "seed": 41,
+              "homesReached": 50,
+              "burnedAreaHa": 10249,
+              "groups": {}
+            },
+            {
+              "seed": 53,
+              "homesReached": 44,
+              "burnedAreaHa": 9714,
+              "groups": {}
+            }
+          ]
+        },
+        "diagnostics": {
+          "iterations": 8,
+          "spent": 32000,
+          "stopReason": "iteration-limit",
+          "evaluatedCandidates": 192
+        },
+        "protection": {
+          "SJC04": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          },
+          "SJC05": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          },
+          "reportedDamageArea": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          }
+        }
+      },
+      "mincut": {
+        "noiseHomes": 5,
+        "withinNoise": true,
+        "cost": 51200,
+        "overBudget": false,
+        "treatedHectares": {
+          "break": 512,
+          "burn": 0,
+          "thin": 0,
+          "zone0": 0
+        },
+        "homesProtected": 0,
+        "perSeedHomesProtected": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "after": {
+          "homesReached": 43,
+          "burnedAreaHa": 3122,
+          "rows": [
+            {
+              "seed": 11,
+              "homesReached": 40,
+              "burnedAreaHa": 4424,
+              "groups": {}
+            },
+            {
+              "seed": 23,
+              "homesReached": 37,
+              "burnedAreaHa": 2889,
+              "groups": {}
+            },
+            {
+              "seed": 37,
+              "homesReached": 44,
+              "burnedAreaHa": 2796,
+              "groups": {}
+            },
+            {
+              "seed": 41,
+              "homesReached": 50,
+              "burnedAreaHa": 2788,
+              "groups": {}
+            },
+            {
+              "seed": 53,
+              "homesReached": 44,
+              "burnedAreaHa": 2713,
+              "groups": {}
+            }
+          ]
+        },
+        "protection": {
+          "SJC04": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          },
+          "SJC05": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          },
+          "reportedDamageArea": {
+            "status": "unavailable",
+            "protected": null,
+            "reason": "B2 approximate community/B6 damage annotation missing; do not infer from synthetic homes."
+          }
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "Uses actual frontend CpuFireSim with the UI seeds/steps; GPU float32 can diverge, so these are not verified UI numbers.",
+    "Min-cut ignores budget and embers by design; repeated baseline is marked overBudget when applicable.",
+    "Mask hectares and coarse-cell costs follow frontend conventions, not per-house billing.",
+    "Synthetic terrain/buildings are not B1/B2 or the reported damage area. No real protection claims without those inputs."
+  ]
+}

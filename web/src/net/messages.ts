@@ -16,6 +16,8 @@ export interface FeedHotspot {
   frp: number;
   conf: number;
   source: string;
+  /** 卫星（FIRMS 的 N、N20、N21 等），报告起火点没有 */
+  satellite?: string;
 }
 
 export type FeedEvent =
@@ -71,7 +73,7 @@ export function normalize(raw: any, meta: GridMeta, now = Date.now()): FeedEvent
       for (const h of raw.items ?? []) {
         const cell = lonLatToCell(meta, h.lon, h.lat);
         if (cell < 0) continue; // 不在本区域内
-        items.push({ id: String(h.id), cell, lon: h.lon, lat: h.lat, time: ts(h.t, time), frp: Number(h.frp) || 0, conf: Number(h.conf) || 0, source: String(h.source ?? "") });
+        items.push({ id: String(h.id), cell, lon: h.lon, lat: h.lat, time: ts(h.t, time), frp: Number(h.frp) || 0, conf: Number(h.conf) || 0, source: String(h.source ?? ""), satellite: h.satellite ? String(h.satellite) : undefined });
       }
       return { kind: "hotspots", time, items };
     }
