@@ -3,7 +3,14 @@ from datetime import UTC, datetime
 from tempfile import TemporaryDirectory
 
 from app.alerts import evaluate_alert
-from app.schemas import ArrivalRisk, Hotspot, ResidentCreate, WindPoint, WindSnapshot
+from app.schemas import (
+    ArrivalRisk,
+    Hotspot,
+    OfficialOrderCreate,
+    ResidentCreate,
+    WindPoint,
+    WindSnapshot,
+)
 from app.store import Store
 
 
@@ -23,8 +30,9 @@ class StoreTests(unittest.TestCase):
             )
 
             self.assertEqual(created.phone_masked, "***0123")
-            self.assertTrue(store.revoke_resident(created.id))
-            self.assertFalse(store.revoke_resident(created.id))
+            self.assertFalse(store.revoke_resident(created.id, "wrong-token"))
+            self.assertTrue(store.revoke_resident(created.id, created.revoke_token))
+            self.assertFalse(store.revoke_resident(created.id, created.revoke_token))
 
     def test_hotspots_are_idempotent_and_wind_round_trips(self) -> None:
         with TemporaryDirectory() as directory:
@@ -83,6 +91,24 @@ class StoreTests(unittest.TestCase):
             attempt = store.create_call_attempt(event_id, resident.id)
             self.assertIsNotNone(attempt)
             self.assertIsNone(store.create_call_attempt(event_id, resident.id))
+
+    def test_official_orders_are_idempotent_and_queryable(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = Store(f"{directory}/test.db")
+            store.initialize()
+            order = OfficialOrderCreate(
+                id="la-order-1",
+                community_id="altadena",
+                level="order",
+                headline="Evacuate now",
+                source="LA County",
+                issued_at=datetime.now(UTC),
+            )
+            _, changed = store.save_official_order(order)
+            _, changed_again = store.save_official_order(order)
+            self.assertTrue(changed)
+            self.assertFalse(changed_again)
+            self.assertEqual(store.active_official_orders("altadena")[0].level, "order")
 
 
 if __name__ == "__main__":

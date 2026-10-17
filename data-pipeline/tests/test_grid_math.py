@@ -50,6 +50,7 @@ def test_build_grid_writes_the_browser_contract(tmp_path) -> None:
             dem=str(dem),
             red=str(red),
             nir=str(nir),
+            nir_narrow=None,
             swir=str(swir),
             scl=None,
             buildings=None,

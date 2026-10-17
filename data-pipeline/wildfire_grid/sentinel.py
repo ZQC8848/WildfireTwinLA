@@ -22,7 +22,7 @@ def discover(bbox: tuple[float, float, float, float], max_cloud: float) -> dict:
         raise RuntimeError("no Sentinel-2 scene matched the query")
     signed = planetary_computer.sign(item)
     assets = {}
-    for name in ("B04", "B08", "B11", "SCL", "visual"):
+    for name in ("B04", "B08", "B8A", "B11", "SCL", "visual"):
         if name in signed.assets:
             assets[name] = signed.assets[name].href
     return {

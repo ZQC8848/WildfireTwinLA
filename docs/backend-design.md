@@ -77,8 +77,11 @@ server/
 | `WS` | `/ws?mode=replay&event=eaton` | 与 live 同契约的回放流 |
 | `POST` | `/api/v1/residents` | 明示同意登记 |
 | `DELETE` | `/api/v1/residents/{id}` | 撤回同意并停止后续外呼 |
-| `POST` | `/api/v1/risks/evaluate` | 接收 C 模块的社区到达风险并推进告警状态机 |
+| `POST` | `/api/v1/risks/evaluate` | 接收单个社区到达风险并推进告警状态机 |
+| `POST` | `/api/v1/risks/evaluate-batch` | 接收 C 模块批量情景结果 |
+| `GET/POST` | `/api/v1/official-orders` | 查询或受保护地写入官方命令 |
 | `POST` | `/webhooks/retell` | 通话状态回写（验签） |
+| `GET` | `/metrics` | Prometheus 格式运行指标 |
 
 WebSocket 连接成功后先发 `snapshot`，随后发送带单调递增 `sequence` 的消息。客户端发现序号缺口时重新请求 REST 快照，而不是猜测丢失状态。
 
@@ -99,7 +102,7 @@ WebSocket 连接成功后先发 `snapshot`，随后发送带单调递增 `sequen
 ## 7. 轮询与容错
 
 - FIRMS：5 分钟；同一周期拉取 SNPP、NOAA-20、NOAA-21 和 MODIS，并记录轮询状态。
-- GOES：通过 NASA FIRMS Area API 的 `GOES_NRT` 产品按相同周期拉取并归一化；若该产品对当前 map key 不可用，其他卫星源继续工作。后续需要像素级云产品时再接 NOAA `ABI-L2-FDCC` NetCDF 解码器。
+- GOES：既支持 FIRMS `GOES_NRT`，也支持直接列出 NOAA GOES-18 S3 的最新 `ABI-L2-FDCC` NetCDF，解码固定网格、火点掩膜、FRP 与置信度后裁剪到项目 bbox。
 - 风况：60 分钟；Open-Meteo 5×5 点批量请求，并直接请求 m/s 单位。
 - 所有 provider 使用超时、有限重试、带 provider 名的指标；某个源失败不会清空现有事件。
 - 只有持有数据库 advisory lock 的 worker 执行轮询。SQLite MVP 强制单 worker。
@@ -122,7 +125,7 @@ WebSocket 连接成功后先发 `snapshot`，随后发送带单调递增 `sequen
 
 ## 10. 当前实现状态
 
-`server/` 已实现真实 provider adapter、SQLite 幂等存储、事件聚类、后台调度、REST/WS、告警迟滞、Retell 幂等外呼与验签回调。`data-pipeline/` 已实现 Sentinel-2 场景发现，以及 DEM、B04/B08/B11、SCL 与建筑 GeoJSON 的统一投影和二进制网格导出。真实在线运行仍需部署方提供 FIRMS 与 Retell 凭据。
+`server/` 已实现真实 provider adapter、SQLite 幂等存储、事件聚类、后台调度、契约化 REST/WS、Eaton 回放、CAP 官方命令、告警迟滞、Retell 幂等外呼与验签回调。`data-pipeline/` 已实现 USGS/OSM 下载、Sentinel-2 场景发现，以及 DEM、B04/B08/B8A/B11、SCL、建筑与社区的统一投影和二进制网格导出。FIRMS 与 Retell 的真实在线运行仍需部署方提供凭据。
 
 ## 11. 关键决策
 

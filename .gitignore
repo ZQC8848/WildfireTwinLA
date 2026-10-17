@@ -1,10 +1,12 @@
 # 依赖与构建
 node_modules/
 dist/
+build/
 .venv/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+*.egg-info/
 
 # 大体积地理数据（原始下载与中间产物）
 data/raw/

@@ -8,7 +8,10 @@ import httpx
 from .alerts import evaluate_alert
 from .clustering import cluster_hotspots, distance_m
 from .config import Settings
-from .providers.firms import FirmsProvider
+from .contracts import hotspot_message, incident_message, official_order_message, wind_message
+from .providers.firms import DEFAULT_SOURCES, FirmsProvider
+from .providers.goes import GoesProvider
+from .providers.official import OfficialOrderProvider
 from .providers.weather import WeatherProvider
 from .realtime import RealtimeHub
 from .retell import RetellGateway
@@ -30,8 +33,17 @@ class BackendService:
         self.settings = settings
         self.store = store
         self.hub = hub
-        self.firms = FirmsProvider(client, settings.firms_map_key, settings.bbox)
+        firms_sources = (
+            tuple(source for source in DEFAULT_SOURCES if source != "GOES_NRT")
+            if settings.enable_direct_goes
+            else DEFAULT_SOURCES
+        )
+        self.firms = FirmsProvider(
+            client, settings.firms_map_key, settings.bbox, sources=firms_sources
+        )
         self.weather = WeatherProvider(client, settings.bbox)
+        self.goes = GoesProvider(client, settings.bbox, settings.goes_satellite)
+        self.official = OfficialOrderProvider(client, settings.official_feed_url)
         self.retell = retell
         self.tasks: list[asyncio.Task] = []
         self.stopping = asyncio.Event()
@@ -53,6 +65,20 @@ class BackendService:
                 name="incident-clusterer",
             ),
         ]
+        if self.settings.enable_direct_goes:
+            self.tasks.append(
+                asyncio.create_task(
+                    self._loop(self.poll_goes, self.settings.goes_poll_seconds),
+                    name="goes-poller",
+                )
+            )
+        if self.settings.official_feed_url:
+            self.tasks.append(
+                asyncio.create_task(
+                    self._loop(self.poll_official_orders, self.settings.official_poll_seconds),
+                    name="official-order-poller",
+                )
+            )
 
     async def stop(self) -> None:
         self.stopping.set()
@@ -83,7 +109,14 @@ class BackendService:
         )
         if inserted:
             await self.hub.broadcast(
-                "hotspots", {"items": [item.model_dump(mode="json") for item in inserted]}
+                "hotspots",
+                hotspot_message(
+                    inserted,
+                    self.settings.bbox,
+                    self.settings.grid_width,
+                    self.settings.grid_height,
+                    self.settings.grid_crs,
+                ),
             )
             await self.cluster_incidents()
         return len(inserted)
@@ -94,7 +127,42 @@ class BackendService:
         self.store.record_provider_success(
             "open-meteo", watermark=snapshot.observed_at.isoformat(), metadata={"points": 25}
         )
-        await self.hub.broadcast("wind", snapshot.model_dump(mode="json"))
+        await self.hub.broadcast("wind", wind_message(snapshot))
+
+    async def poll_goes(self) -> int:
+        object_key, hotspots = await self.goes.fetch()
+        inserted = self.store.upsert_hotspots(hotspots)
+        self.store.record_provider_success(
+            "goes-abi-fdcc",
+            watermark=object_key,
+            metadata={"fetched": len(hotspots), "new": len(inserted)},
+        )
+        if inserted:
+            await self.hub.broadcast(
+                "hotspots",
+                hotspot_message(
+                    inserted,
+                    self.settings.bbox,
+                    self.settings.grid_width,
+                    self.settings.grid_height,
+                    self.settings.grid_crs,
+                ),
+            )
+            await self.cluster_incidents()
+        return len(inserted)
+
+    async def poll_official_orders(self) -> int:
+        orders = await self.official.fetch()
+        changed = 0
+        for order in orders:
+            saved, was_changed = self.store.save_official_order(order)
+            if was_changed:
+                changed += 1
+                await self.hub.broadcast("official_order", official_order_message(saved))
+        self.store.record_provider_success(
+            "official-orders", metadata={"fetched": len(orders), "changed": changed}
+        )
+        return changed
 
     async def cluster_incidents(self) -> list[Incident]:
         hotspots = self.store.recent_hotspots(hours=self.settings.incident_close_hours)
@@ -113,10 +181,8 @@ class BackendService:
             self.store.upsert_incident(incident)
             incidents.append(incident)
         self.store.close_stale_incidents(self.settings.incident_close_hours)
-        if incidents:
-            await self.hub.broadcast(
-                "incidents", {"items": [item.model_dump(mode="json") for item in incidents]}
-            )
+        for incident in incidents:
+            await self.hub.broadcast("incident", incident_message(incident))
         return incidents
 
     @staticmethod
