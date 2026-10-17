@@ -163,8 +163,8 @@ def build_tower(height: float = 40.0) -> dict:
                     wire_points.append([round(tip.x, 3), round(tip.y, 3), round(tip.z - drop, 3)])
         return b
 
-    lod0 = _make(build(True), "transmission-tower_LOD0", coll)
-    lod1 = _make(build(False), "transmission-tower_LOD1", coll)
+    lod0 = _make(build(True), "transmission-tower_v0_LOD0", coll)
+    lod1 = _make(build(False), "transmission-tower_v0_LOD1", coll)
     # glTF Y 轴向上：导出时 Blender 的 (x, y, z) 变为 (x, z, -y)
     lod0["wire_points"] = [[p[0], p[2], -p[1]] for p in wire_points]
     lod1.location.x = 20
@@ -193,8 +193,8 @@ def build_pole(height: float = 12.0) -> dict:
             b.box((0.42, 0, height - 3.05), (0.5, 0.5, 1.1), GREY)
         return b
 
-    lod0 = _make(build(True), "utility-pole_LOD0", coll)
-    lod1 = _make(build(False), "utility-pole_LOD1", coll)
+    lod0 = _make(build(True), "utility-pole_v0_LOD0", coll)
+    lod1 = _make(build(False), "utility-pole_v0_LOD1", coll)
     lod0["wire_points"] = wire_points
     lod1.location.x = 5
     return {lod: len(o.data.polygons) for lod, o in (("LOD0", lod0), ("LOD1", lod1))}
