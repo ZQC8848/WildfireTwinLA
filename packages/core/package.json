@@ -1,0 +1,1 @@
+{"name":"@wildfire-twin/core","version":"0.1.0","private":true,"type":"module","exports":"./src/index.ts","scripts":{"test":"node --test test/*.test.ts","demo":"node demo.ts"},"engines":{"node":">=22.18"}}
