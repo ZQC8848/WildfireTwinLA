@@ -27,6 +27,7 @@ import { RealtimeController } from "./realtime/controller";
 import { Bloom } from "./scene/post";
 import { CameraRig } from "./scene/cameraRig";
 import { cellXY } from "@core";
+import { NORTE_SCENARIO, norteIgnitionCells } from "./data/norte";
 
 const q = new URLSearchParams(location.search);
 const debug = q.has("debug");
@@ -71,8 +72,9 @@ ctx.scene.add(wires.object);
 const simParams = {
   running: false,
   stepsPerSecond: 20,
-  windSpeed: 8,
-  windFrom: 45,
+  // Plan 默认情景：Norte Fire 当天中午的 HRRR 风
+  windSpeed: NORTE_SCENARIO.windSpeed,
+  windFrom: NORTE_SCENARIO.windFrom,
   windMode: "terrain" as WindMode,
   showWind: false,
   spotting: true,
@@ -233,7 +235,7 @@ const shell = new Shell(
     },
   },
   {
-    areaLabel: "Altadena foothills",
+    areaLabel: bundle.source === "real" ? "San Juan Capistrano and San Clemente" : "Norte Fire area, synthetic terrain",
     windDir: simParams.windFrom,
     windSpeed: simParams.windSpeed,
     stepsPerSecond: simParams.stepsPerSecond,
@@ -261,7 +263,7 @@ window.dispatchEvent(new Event("resize"));
     ["Dense chaparral", `${Math.round((dense / Math.max(1, veg)) * 100)}% of vegetation`],
     ["Homes", bundle.buildings.length.toLocaleString("en-US")],
     ["Communities", String(bundle.communities.length)],
-    ["Data", bundle.source === "mock" ? "Synthetic test grid" : "Sentinel-2 and USGS"],
+    ["Data", bundle.source === "mock" ? "Synthetic test grid" : "Sentinel-2, USGS 3DEP and OSM"],
   ]);
 }
 
@@ -327,6 +329,7 @@ const planner: PlannerController = new PlannerController({
   inflow,
   windField: () => currentWind,
   ignitions: () => testIgnitions,
+  scenario: () => ({ cells: norteIgnitionCells(meta), label: NORTE_SCENARIO.label }),
 });
 
 // ---- 实时数据与回放（P5） ----
@@ -347,7 +350,7 @@ const realtime: RealtimeController = new RealtimeController({
   },
   setFeedWind: (mean, field) => {
     feedField = field;
-    simParams.windSpeed = Math.round(mean.speedMs);
+    simParams.windSpeed = Math.round(mean.speedMs * 2) / 2;
     simParams.windFrom = Math.round(mean.dirFromDeg);
     shell.setWind(simParams.windFrom, simParams.windSpeed);
     applyWind();
@@ -454,10 +457,17 @@ ctx.onFrame((dt) => {
     applyNight(night);
   }
   if (simActive && simParams.running) {
-    stepAcc += dt * simParams.stepsPerSecond;
-    const n = Math.min(8, Math.floor(stepAcc));
-    stepAcc -= n;
-    if (n > 0) sim.advance(n);
+    // 回放中模拟跟着回放时钟走，火点和风才会落在正确的模拟时刻；其余情况按速度档推进
+    const replayAt = realtime.replayMinutes();
+    if (replayAt !== null) {
+      const n = Math.min(8, Math.floor((replayAt - sim.minutes) / SpreadParams.stepMinutes));
+      if (n > 0) sim.advance(n);
+    } else {
+      stepAcc += dt * simParams.stepsPerSecond;
+      const n = Math.min(8, Math.floor(stepAcc));
+      stepAcc -= n;
+      if (n > 0) sim.advance(n);
+    }
   }
   // 每步之后状态纹理会换成另一张，所以每帧都重新指向当前那张
   propMaterial.uniforms.uState.value = sim.texture;
@@ -496,7 +506,7 @@ function refreshPanels() {
     simActive ? sim.minutes : null,
     viewMinutes ?? sim.minutes,
     viewMinutes === null,
-    monitor.events.map((e) => ({ minutes: e.minutes, level: e.level })),
+    [...monitor.events.map((e) => ({ minutes: e.minutes, level: e.level })), ...realtime.ticks()],
   );
   const reached = monitor.communities.filter((c) => c.level === "reached").length;
   const fs = simActive ? sim.stats() : null;
@@ -513,14 +523,20 @@ function refreshPanels() {
   );
   const feedRows: [string, string][] = [];
   if (realtime.mode !== "off") {
+    const ag = realtime.agreement();
     feedRows.push(["Satellite hotspots", realtime.hotspotsReceived.toLocaleString("en-US")]);
+    if (ag) {
+      feedRows.push(["Satellite passes", String(realtime.passes.length)]);
+      feedRows.push(["Pixels the model had reached", `${ag.reached} of ${ag.pixels} (${Math.round((ag.reached / ag.pixels) * 100)}%)`]);
+      feedRows.push(["Model fire near a detection", `${Math.round(ag.confirmedShare * 100)}%`]);
+    }
     if (realtime.perimeter) {
       feedRows.push(["Official perimeter", `${Math.round(realtime.perimeterHa).toLocaleString("en-US")} ha`]);
       const iou = realtime.perimeterMatch(sim.lastState);
       if (iou !== null) feedRows.push(["Overlap with simulation", `${Math.round(iou * 100)}%`]);
     }
   }
-  shell.setFeed(realtime.mode, realtime.status, feedRows);
+  shell.setFeed(realtime.mode, realtime.status, feedRows, realtime.bundledReplay);
   shell.setCalls(realtime.callTally());
   shell.setRespond(simActive ? monitor.closest() : null, monitor.communities, { affected: monitor.homesAffected, total: monitor.totalHomes }, monitor.events);
   if (debug) {

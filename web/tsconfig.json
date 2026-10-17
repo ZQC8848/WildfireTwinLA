@@ -12,6 +12,7 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
+    "resolveJsonModule": true,
     "paths": { "@core": ["../packages/core/src/index.ts"] }
   },
   "include": ["src", "../packages/core/src"]

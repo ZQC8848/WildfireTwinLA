@@ -130,10 +130,11 @@ export class Shell {
       <section data-mode-only="respond" class="first">
         <h2>Data source</h2>
         <div class="segmented feed-modes" id="feed-mode" role="group" aria-label="Data source">
-          <button data-feed="off" aria-pressed="true">Simulation</button><button data-feed="live" aria-pressed="false">Live feed</button><button data-feed="replay" aria-pressed="false">Eaton replay</button>
+          <button data-feed="off" aria-pressed="true">Simulation</button><button data-feed="live" aria-pressed="false">Live feed</button><button data-feed="replay" aria-pressed="false">Norte replay</button>
         </div>
-        <p class="tool-note" id="feed-status">Test fires you place on the map. Switch to the live feed for satellite hotspots, or replay the Eaton Fire.</p>
+        <p class="tool-note" id="feed-status">Test fires you place on the map. Switch to the live feed for satellite hotspots, or replay the Norte Fire of Oct 16, 2026.</p>
         <dl class="metrics" id="feed-metrics"></dl>
+        <p class="tool-note feed-legend" id="feed-legend" hidden><i class="sw sw-sat"></i>Satellite hotspot <i class="sw sw-miss"></i>Model had not reached it <i class="sw sw-report"></i>Reported ignition</p>
       </section>
       <section data-mode-only="respond">
         <div id="respond-empty"><h2>No active fire</h2><p>Click the map to place an ignition. Distances, arrival estimates and affected homes update as the fire spreads.</p></div>
@@ -187,7 +188,7 @@ export class Shell {
       <div class="bar-group">
         <label for="wind-dir">Wind from</label>
         <select class="select" id="wind-dir">${dirOptions}</select>
-        <input class="range" id="wind-speed" type="range" min="0" max="30" step="1" aria-label="Wind speed" />
+        <input class="range" id="wind-speed" type="range" min="0" max="30" step="0.5" aria-label="Wind speed" />
         <span class="figure" id="wind-speed-label"></span>
       </div>
       <div class="bar-group">
@@ -475,12 +476,19 @@ export class Shell {
   }
 
   // ---- 数据源 ----
-  setFeed(mode: "off" | "live" | "replay", status: string, rows: [string, string][]) {
+  setFeed(mode: "off" | "live" | "replay", status: string, rows: [string, string][], bundled = false) {
     document.querySelectorAll<HTMLButtonElement>("#feed-mode button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.feed === mode)));
-    this.q<HTMLParagraphElement>("#feed-status").textContent =
-      mode === "off" ? "Test fires you place on the map. Switch to the live feed for satellite hotspots, or replay the Eaton Fire." : status;
+    const notes: Record<typeof mode, string> = {
+      off: "Test fires you place on the map. Switch to the live feed for satellite hotspots, or replay the Norte Fire of Oct 16, 2026.",
+      live: status,
+      replay:
+        `${status} After-the-fact replay of the Norte Fire from public data (NIFC incident records, NASA FIRMS, NOAA HRRR wind). Not an official product.` +
+        (bundled ? " Evacuation orders and the final perimeter are not in this replay yet." : ""),
+    };
+    this.q<HTMLParagraphElement>("#feed-status").textContent = notes[mode];
+    this.q<HTMLParagraphElement>("#feed-legend").hidden = mode === "off";
     this.q<HTMLDListElement>("#feed-metrics").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
-    this.feedLabel = mode === "live" ? "Live feed" : mode === "replay" ? "Eaton replay" : "";
+    this.feedLabel = mode === "live" ? "Live feed" : mode === "replay" ? "Norte replay" : "";
   }
 
   private feedLabel = "";

@@ -309,6 +309,48 @@ body[data-mode="respond"] .rail [data-mode-only="respond"] {
   white-space: nowrap;
 }
 
+.timeline-ticks i[data-level="satellite"] {
+  background: var(--marine);
+  height: 10px;
+  top: -2px;
+  opacity: 1;
+}
+
+.timeline-ticks i[data-level="report"] {
+  background: var(--ash);
+  width: 3px;
+  height: 12px;
+  top: -3px;
+  opacity: 1;
+  box-shadow: 0 0 0 1px var(--ember);
+}
+
+.feed-legend .sw {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin: 0 4px 0 8px;
+  border-radius: 2px;
+  vertical-align: baseline;
+}
+
+.feed-legend .sw:first-child {
+  margin-left: 0;
+}
+
+.sw-sat {
+  background: var(--ember);
+}
+
+.sw-miss {
+  background: var(--marine);
+}
+
+.sw-report {
+  background: #fff4e8;
+  box-shadow: 0 0 0 1px var(--ink-muted);
+}
+
 .bar-spacer {
   flex: 1;
 }
