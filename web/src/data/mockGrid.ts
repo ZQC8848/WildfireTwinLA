@@ -20,6 +20,8 @@ export interface GridBundle {
   buildings: Building[];
   communities: Community[];
   source: "real" | "mock";
+  /** LANDFIRE FBFM40 代码（可选的 fuel-model.bin），只用于显示 */
+  fuelModel?: Uint8Array;
 }
 
 function mulberry32(seed: number) {

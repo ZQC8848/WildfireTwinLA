@@ -13,6 +13,7 @@
 
 import * as THREE from "three";
 import { CellClass, GRID_CHANNELS, type Grid } from "@core";
+import { FuelGroup } from "../data/fuelModel";
 
 const INF = 1e20;
 
@@ -99,7 +100,7 @@ function blur3(src: Float32Array, W: number, H: number, passes: number): Float32
 /** 把不可燃格子分成河流与道路 */
 const SEA_LEVEL_M = 1;
 
-export function classify(grid: Grid, inferStreams = true): { water: Uint8Array; road: Uint8Array } {
+export function classify(grid: Grid, inferStreams = true, fuelGroups?: Uint8Array): { water: Uint8Array; road: Uint8Array } {
   const { width: W, height: H } = grid.meta;
   const cls = (i: number) => grid.data[i * GRID_CHANNELS + 3];
   // 社区范围：建筑格向外扩 3 格
@@ -151,14 +152,16 @@ export function classify(grid: Grid, inferStreams = true): { water: Uint8Array; 
       }
     }
     const isStream = inferStreams && inTown / comp.length < 0.5;
-    for (const c of comp) (isStream || grid.data[c * GRID_CHANNELS] <= SEA_LEVEL_M ? water : road)[c] = 1;
+    // 有 LANDFIRE 燃料类别时直接用其中的水体（NB8），内陆水面也能识别
+    const isWater = (c: number) => (fuelGroups ? fuelGroups[c] === FuelGroup.Water : grid.data[c * GRID_CHANNELS] <= SEA_LEVEL_M);
+    for (const c of comp) (isStream || isWater(c) ? water : road)[c] = 1;
   }
   return { water, road };
 }
 
-export function buildWaterTexture(grid: Grid, inferStreams = true): THREE.DataTexture {
+export function buildWaterTexture(grid: Grid, inferStreams = true, fuelGroups?: Uint8Array): THREE.DataTexture {
   const { width: W, height: H, cellSize: S } = grid.meta;
-  const { water, road } = classify(grid, inferStreams);
+  const { water, road } = classify(grid, inferStreams, fuelGroups);
   // 两遍 3×3 平滑：等值线在格子角点处不再有尖角
   const sdfWater = blur3(signedDistance(water, W, H, S), W, H, 2);
   const sdfRoad = blur3(signedDistance(road, W, H, S), W, H, 1);

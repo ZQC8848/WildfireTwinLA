@@ -32,7 +32,8 @@ def read_band(
             resampling=resampling,
         ) as dataset,
     ):
-        return dataset.read(1, masked=True).filled(np.nan).astype("float32")
+        # astype before filled: integer rasters (SCL, FBFM40) cannot hold NaN
+        return dataset.read(1, masked=True).astype("float32").filled(np.nan)
 
 
 def normalized_difference(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -48,6 +49,21 @@ def terrain_derivatives(
     slope = np.arctan(np.hypot(grad_x, grad_y)).astype("float32")
     aspect = np.mod(np.arctan2(-grad_x, grad_y), 2 * np.pi).astype("float32")
     return slope, aspect
+
+
+def footprint_ring(geometry: dict) -> list[list[float]]:
+    """Outer ring as [[lon, lat], ...], the `polygonLonLat` contract in packages/core/src/types.ts.
+
+    MultiPolygons keep their first polygon; holes are dropped.
+    """
+    if geometry.get("type") == "Polygon":
+        ring = geometry["coordinates"][0]
+    elif geometry.get("type") == "MultiPolygon":
+        ring = geometry["coordinates"][0][0]
+    else:
+        return []
+    # 6 decimals is about 0.1 m, plenty for footprints and keeps buildings.json small
+    return [[round(float(point[0]), 6), round(float(point[1]), 6)] for point in ring]
 
 
 def load_buildings(path: str | None, crs: str, transform, shape: tuple[int, int]):
@@ -76,7 +92,7 @@ def load_buildings(path: str | None, crs: str, transform, shape: tuple[int, int]
                 "id": str(feature.get("id") or feature.get("properties", {}).get("id") or index),
                 "cell": int(row) * width + int(column),
                 "weight": feature.get("properties", {}).get("weight", 1),
-                "polygonLonLat": geometry,
+                "polygonLonLat": footprint_ring(geometry),
             }
         )
     mask = rasterize(projected, out_shape=shape, transform=transform, fill=0, dtype="uint8")
@@ -127,9 +143,20 @@ def build_grid(args: argparse.Namespace) -> None:
     building_mask, buildings = load_buildings(
         args.buildings, args.crs, transform, (args.height, args.width)
     )
-    classes = np.where(fuel > 0, 1, 0).astype("float32")
-    classes[building_mask == 1] = 2
-    fuel[building_mask == 1] = 0
+    if getattr(args, "fbfm40", None):
+        # LANDFIRE fuel models decide fuel and class; NDVI only flags green developed land
+        from .fuels import apply_fbfm40
+
+        model = read_band(args.fbfm40, **read_options, resampling=Resampling.nearest)
+        model = np.nan_to_num(model, nan=0).astype("int32")
+        fuel, classes, dryness = apply_fbfm40(
+            model, np.nan_to_num(fuel) > 0, building_mask == 1, np.nan_to_num(dryness), fuel
+        )
+        np.clip(model, 0, 255).astype("uint8").tofile(output / "fuel-model.bin")
+    else:
+        classes = np.where(fuel > 0, 1, 0).astype("float32")
+        classes[building_mask == 1] = 2
+        fuel[building_mask == 1] = 0
     grid = np.stack(
         (
             np.nan_to_num(elevation),
@@ -164,6 +191,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--swir")
     result.add_argument("--scl")
     result.add_argument("--buildings")
+    result.add_argument(
+        "--fbfm40", help="LANDFIRE FBFM40 GeoTIFF (`wildfire-source fbfm40`); recommended"
+    )
     result.add_argument(
         "--bbox", required=True, type=lambda value: tuple(map(float, value.split(",")))
     )

@@ -176,14 +176,14 @@ body[data-mode="respond"] .rail [data-mode-only="respond"] {
 /* 指标：左标签、右数字 */
 .metrics {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(45%, 1fr) minmax(0, auto);
   gap: 6px 12px;
   margin: 0;
 }
 
+/* 标签至少占 45% 宽度，标签与数值都可以换行，长文本不会挤出侧栏或互相重叠 */
 .metrics dt {
   color: var(--ink-muted);
-  white-space: nowrap;
 }
 
 .metrics dd {
@@ -344,6 +344,11 @@ body[data-mode="respond"] .rail [data-mode-only="respond"] {
 
 .sw-miss {
   background: var(--marine);
+}
+
+.sw-damage {
+  background: repeating-linear-gradient(90deg, #fadb9e 0 3px, transparent 3px 5px);
+  box-shadow: 0 0 0 1px var(--ink-muted);
 }
 
 .sw-report {

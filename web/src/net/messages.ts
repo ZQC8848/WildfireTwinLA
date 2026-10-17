@@ -24,7 +24,7 @@ export type FeedEvent =
   | { kind: "snapshot"; time: number; mode: string; dataset?: string }
   | { kind: "wind"; time: number; field: WindField; mean: Wind }
   | { kind: "hotspots"; time: number; items: FeedHotspot[] }
-  | { kind: "incident"; time: number; id: string; perimeterCells: number[] | null }
+  | { kind: "incident"; time: number; id: string; perimeterCells: number[] | null; perimeterLabel?: string; perimeterOfficial?: boolean }
   | { kind: "alert"; time: number; communityId: string; level: FeedLevel; etaMin: number }
   | { kind: "official"; time: number; communityId: string; level: string; headline: string }
   | { kind: "call"; time: number; buildingId: string; status: string }
@@ -78,7 +78,15 @@ export function normalize(raw: any, meta: GridMeta, now = Date.now()): FeedEvent
       return { kind: "hotspots", time, items };
     }
     case "incident":
-      return { kind: "incident", time, id: String(raw.id), perimeterCells: Array.isArray(raw.perimeterCells) ? raw.perimeterCells : null };
+      return {
+        kind: "incident",
+        time,
+        id: String(raw.id),
+        perimeterCells: Array.isArray(raw.perimeterCells) ? raw.perimeterCells : null,
+        // 火界来源：官方火界、卫星烧痕或卫星检测范围；没有说明时按官方处理（旧格式）
+        perimeterLabel: typeof raw.perimeterLabel === "string" ? raw.perimeterLabel : undefined,
+        perimeterOfficial: typeof raw.perimeterOfficial === "boolean" ? raw.perimeterOfficial : undefined,
+      };
     case "alert":
       return { kind: "alert", time, communityId: String(raw.communityId), level: raw.level, etaMin: Number(raw.etaMin) };
     case "official_order":

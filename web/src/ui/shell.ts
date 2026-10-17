@@ -136,7 +136,7 @@ export class Shell {
         </div>
         <p class="tool-note" id="feed-status">Shows the test fire from Plan mode. Switch to the live feed for satellite hotspots, or replay the Norte Fire of Oct 16, 2026.</p>
         <dl class="metrics" id="feed-metrics"></dl>
-        <p class="tool-note feed-legend" id="feed-legend" hidden><i class="sw sw-sat"></i>Satellite hotspot <i class="sw sw-miss"></i>Model had not reached it <i class="sw sw-report"></i>Reported ignition</p>
+        <p class="tool-note feed-legend" id="feed-legend" hidden><i class="sw sw-sat"></i>Satellite hotspot <i class="sw sw-miss"></i>Model had not reached it <i class="sw sw-report"></i>Reported ignition<span id="legend-damage" hidden> <i class="sw sw-damage"></i>Reported damage area (street level, not a per-home list)</span></p>
       </section>
       <section data-mode-only="respond">
         <div id="respond-empty"><h2>No active fire</h2><p>Start the Norte replay or the live feed above, or place a test fire in Plan mode. Distances, arrival estimates and affected homes update as the fire spreads.</p></div>
@@ -485,6 +485,11 @@ export class Shell {
       `<tr><th>Cost</th>${keys.map((k) => cell(k, (r) => (r.cost ? fmtMoney(r.cost) + (r.overBudget ? "*" : "") : "–"))).join("")}</tr>`,
       `<tr><th>Homes saved per $100k</th>${keys.map((k) => cell(k, (r) => (r.withinNoise ? "≈ 0" : r.savedPer100k === null ? "–" : r.savedPer100k.toFixed(1)))).join("")}</tr>`,
     ].join("");
+  }
+
+  /** 有报告受损区域数据时在图例里加一项 */
+  setDamageLegend(show: boolean) {
+    this.q<HTMLSpanElement>("#legend-damage").hidden = !show;
   }
 
   // ---- 集合预报 ----

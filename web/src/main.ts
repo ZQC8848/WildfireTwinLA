@@ -28,6 +28,8 @@ import { Bloom } from "./scene/post";
 import { CameraRig } from "./scene/cameraRig";
 import { cellXY } from "@core";
 import { NORTE_SCENARIO, norteIgnitionCells } from "./data/norte";
+import { FUEL_GROUP_COLORS, FuelGroup, fuelGroups, fuelModelName } from "./data/fuelModel";
+import { LAYERS } from "./scene/layers";
 import { ENSEMBLE_FACTOR, ENSEMBLE_MEMBERS, Ensemble, communityOutlook, type CommunityOutlook, type EnsembleResult } from "./sim/ensemble";
 
 const q = new URLSearchParams(location.search);
@@ -39,7 +41,22 @@ const { grid } = bundle;
 const { meta } = grid;
 const ctx = createScene(document.getElementById("app")!);
 
-const terrain = new Terrain(grid, 1.5, bundle.source === "mock");
+// LANDFIRE 燃料类别（有 fuel-model.bin 时）：地表按类别着色，水面用其中的水体
+const groups = bundle.fuelModel ? fuelGroups(bundle.fuelModel) : undefined;
+const terrain = new Terrain(grid, 1.5, bundle.source === "mock", groups);
+// 报告受损区域（buildings.json 的 reportedDamageArea，街道级别，不是逐户确认）：Respond 模式下画成虚线轮廓
+const damageCells = bundle.buildings.filter((b) => (b as { reportedDamageArea?: boolean }).reportedDamageArea).map((b) => b.cell);
+terrain.setDamageArea(damageCells);
+if (groups) {
+  LAYERS.natural.swatches = [
+    { label: "Cured grass", color: FUEL_GROUP_COLORS[FuelGroup.Grass]! },
+    { label: "Grass and sage scrub", color: FUEL_GROUP_COLORS[FuelGroup.GrassShrub]! },
+    { label: "Chaparral and woodland", color: FUEL_GROUP_COLORS[FuelGroup.Shrub]! },
+    { label: "Neighborhoods", color: "#9c9a84" },
+    { label: "Developed land and roads", color: "#78766e" },
+    { label: "Water", color: "#3f5f6a" },
+  ];
+}
 ctx.scene.add(terrain.mesh);
 
 // Tia 导出与网格对齐的真彩色底图后自动启用；合成网格没有对应底图
@@ -281,6 +298,7 @@ const shell = new Shell(
     elevRange: [terrain.minElev, terrain.maxElev],
   },
 );
+shell.setDamageLegend(damageCells.length > 0);
 // 画布尺寸由 shell 的布局决定（侧栏、顶栏、底栏之外的区域）
 window.dispatchEvent(new Event("resize"));
 
@@ -295,13 +313,24 @@ window.dispatchEvent(new Event("resize"));
     if (grid.data[c * GRID_CHANNELS + 1] > 0.6) dense++;
   }
   const km2 = (n * meta.cellSize * meta.cellSize) / 1e6;
+  const share = (g: FuelGroup) => {
+    let k = 0;
+    for (let c = 0; c < n; c++) if (groups![c] === g && grid.data[c * GRID_CHANNELS + 3] === CellClass.Vegetation) k++;
+    return `${Math.round((k / Math.max(1, veg)) * 100)}% of vegetation`;
+  };
   shell.setOverview([
     ["Area", `${km2.toFixed(0)} km²`],
     ["Wildland vegetation", `${Math.round((veg / n) * 100)}%`],
-    ["Dense chaparral", `${Math.round((dense / Math.max(1, veg)) * 100)}% of vegetation`],
+    ...((groups
+      ? [
+          ["Cured grass", share(FuelGroup.Grass)],
+          ["Grass and sage scrub", share(FuelGroup.GrassShrub)],
+          ["Chaparral", share(FuelGroup.Shrub)],
+        ]
+      : [["Dense chaparral", `${Math.round((dense / Math.max(1, veg)) * 100)}% of vegetation`]]) as [string, string][]),
     ["Homes", bundle.buildings.length.toLocaleString("en-US")],
     ["Communities", String(bundle.communities.length)],
-    ["Data", bundle.source === "mock" ? "Synthetic test grid" : "Sentinel-2, USGS 3DEP and OSM"],
+    ["Data", bundle.source === "mock" ? "Synthetic test grid" : groups ? "LANDFIRE, Sentinel-2, USGS 3DEP and OSM" : "Sentinel-2, USGS 3DEP and OSM"],
   ]);
 }
 
@@ -338,6 +367,7 @@ const applyNight = (v: number) => {
 function setMode(mode: Mode) {
   shell.setMode(mode);
   nightTarget = mode === "respond" ? 1 : 0;
+  terrain.showDamageArea(mode === "respond");
   if (mode === "respond") terrain.layer = "natural";
   else terrain.layer = (document.getElementById("layer") as HTMLSelectElement).value as LayerId;
   if (reducedMotion) {
@@ -408,6 +438,8 @@ const describe = (cell: number): string => {
   const cls = grid.data[cell * GRID_CHANNELS + 3];
   const fuel = grid.data[cell * GRID_CHANNELS + 1];
   if (cls === CellClass.Building) return "Neighborhood";
+  const named = bundle.fuelModel ? fuelModelName(bundle.fuelModel[cell]) : null;
+  if (named) return named;
   if (cls === CellClass.Unburnable) return "Road or stream";
   return fuel > 0.6 ? "Dense chaparral" : fuel > 0.3 ? "Chaparral and grass" : "Dry grass";
 };
@@ -574,8 +606,13 @@ function refreshPanels() {
       feedRows.push(["Pixels the model had reached", `${ag.reached} of ${ag.pixels} (${Math.round((ag.reached / ag.pixels) * 100)}%)`]);
       feedRows.push(["Model fire near a detection", `${Math.round(ag.confirmedShare * 100)}%`]);
     }
+    if (realtime.mode === "replay" && damageCells.length) {
+      let reached = 0;
+      if (sim.lastState) for (const c of damageCells) if (sim.lastState[c * 4] > 0.5) reached++;
+      feedRows.push(["Reported damage area, buildings the model reached", `${reached} of ${damageCells.length}`]);
+    }
     if (realtime.perimeter) {
-      feedRows.push(["Official perimeter", `${Math.round(realtime.perimeterHa).toLocaleString("en-US")} ha`]);
+      feedRows.push([realtime.perimeterLabel, `${Math.round(realtime.perimeterHa).toLocaleString("en-US")} ha`]);
       const iou = realtime.perimeterMatch(sim.lastState);
       if (iou !== null) feedRows.push(["Overlap with simulation", `${Math.round(iou * 100)}%`]);
     }

@@ -3,6 +3,7 @@
 import * as THREE from "three";
 import { GRID_CHANNELS, type Grid } from "@core";
 import { CLASS_COLORS, LAYERS, type LayerId } from "./layers";
+import { FUEL_GROUP_COLORS, FuelGroup } from "../data/fuelModel";
 import { buildWaterTexture } from "./waterField";
 
 const vertexShader = /* glsl */ `
@@ -63,6 +64,9 @@ uniform bool uHasSatellite;
 uniform vec3 uClassColors[3];
 // 0 稀疏干草，1 茂密灌丛，2 干燥色调，3 建筑
 uniform vec3 uNatural[4];
+uniform sampler2D uFuelGroup; // 可选：LANDFIRE 燃料类别（R × 255 = FuelGroup），Natural 图层按类别着色
+uniform bool uHasFuelGroup;
+uniform vec3 uFuelColors[4];  // 草地、草灌、灌丛、林地
 uniform float uNight; // 0 白天（Plan）到 1 夜间（Respond）
 uniform sampler2D uWater; // R 河岸有向距离（米），G 路缘有向距离（米），BA 水流方向
 uniform vec3 uSkyColor;   // 水面反射的天空颜色，随模式变化
@@ -73,6 +77,8 @@ uniform bool uHasTreat;
 uniform vec3 uRetardant;
 uniform sampler2D uPerimeter; // 官方火界（R > 0 为火界内），只画轮廓作为对照
 uniform bool uHasPerimeter;
+uniform sampler2D uDamage; // 报告受损区域（R > 0 为区域内），只画虚线轮廓作为对照
+uniform bool uHasDamage;
 uniform sampler2D uForecast; // 集合预报统计（降采样网格）：R 燃烧概率，B 中位数着火时刻（距预报起点的分钟，-1 为未过半）
 uniform bool uHasForecast;
 uniform vec2 uForecastSize;
@@ -103,6 +109,20 @@ vec4 bilinear(vec2 p) {
   ivec2 c = ivec2(floor(p));
   vec4 a = mix(cellAt(c), cellAt(c + ivec2(1, 0)), f.x);
   vec4 b = mix(cellAt(c + ivec2(0, 1)), cellAt(c + ivec2(1, 1)), f.x);
+  return mix(a, b, f.y);
+}
+
+// 燃料类别配色：四个角的类别颜色做双线性混合，类别边界不出现 25 m 方块
+vec3 fuelColorAt(ivec2 c, vec3 fallback) {
+  c = clamp(c, ivec2(0), ivec2(uGridSize) - 1);
+  int g = int(texelFetch(uFuelGroup, c, 0).r * 255.0 + 0.5);
+  return g >= 1 && g <= 4 ? uFuelColors[g - 1] : fallback;
+}
+vec3 fuelColor(vec2 p, vec3 fallback) {
+  vec2 f = fract(p);
+  ivec2 c = ivec2(floor(p));
+  vec3 a = mix(fuelColorAt(c, fallback), fuelColorAt(c + ivec2(1, 0), fallback), f.x);
+  vec3 b = mix(fuelColorAt(c + ivec2(0, 1), fallback), fuelColorAt(c + ivec2(1, 1), fallback), f.x);
   return mix(a, b, f.y);
 }
 
@@ -197,11 +217,15 @@ void main() {
       // 燃料到覆盖度的曲线：中等燃料就已经是大片深色灌丛，稀疏处才露出干草
       float cover = smoothstep(0.08, 0.6, fuel);
       vec3 veg = mix(mix(uNatural[0], uNatural[1], cover), uNatural[2], dryness * 0.25);
+      // 有 LANDFIRE 燃料类别时按类别着色：枯草是草黄色，不会因为燃料值高被画成深绿灌丛
+      if (uHasFuelGroup) veg = mix(fuelColor(vCell, veg), uNatural[2], dryness * 0.15);
       col = vb.x * veg + vb.y * uNatural[3];
       // 河岸外 10 m 内略暗：湿润的河岸
       col *= 1.0 - 0.22 * smoothstep(10.0, 0.0, wf.r) * (1.0 - water);
       // 大片铺装（城区的停车场、硬化地面）离路缘较远处过渡到浅色混凝土，窄路仍是深色路面
       vec3 paved = mix(uClassColors[0], vec3(0.5, 0.5, 0.47), smoothstep(-10.0, -35.0, wf.g));
+      // 有燃料类别时，不可燃区域几乎都是城区（道路无法单独识别），统一画成暖灰色的建成区地面
+      if (uHasFuelGroup) paved = vec3(0.47, 0.46, 0.43) * (0.94 + 0.12 * vnoise(vWorldXZ * 0.02));
       col = mix(col, paved, road);
     }
   } else if (uLayer == 1) {
@@ -363,6 +387,26 @@ void main() {
     col = mix(col, vec3(0.93, 0.95, 0.92), line);
   }
 
+  // 报告受损区域：与官方火界同样取覆盖度 0.5 等值线，画成浅色虚线，与实线的火界区分
+  if (uHasDamage) {
+    vec2 f = fract(vCell);
+    ivec2 c0 = ivec2(floor(vCell));
+    ivec2 hi = ivec2(uGridSize) - 1;
+    float cov = 0.0;
+    for (int j = 0; j < 2; j++) {
+      for (int i = 0; i < 2; i++) {
+        float v = texelFetch(uDamage, clamp(c0 + ivec2(i, j), ivec2(0), hi), 0).r;
+        cov += (i == 1 ? f.x : 1.0 - f.x) * (j == 1 ? f.y : 1.0 - f.y) * step(0.5 / 255.0, v);
+      }
+    }
+    float d = abs(cov - 0.5);
+    float fw = max(fwidth(cov), 1e-4);
+    float line = 1.0 - smoothstep(fw * 1.0, fw * 2.0, d);
+    float dash = step(0.45, fract((vWorldXZ.x + vWorldXZ.y) / 36.0));
+    col = mix(col, vec3(0.05), (1.0 - smoothstep(fw * 2.0, fw * 3.5, d)) * 0.45 * dash);
+    col = mix(col, vec3(0.98, 0.86, 0.62), line * dash);
+  }
+
   // 集合预报：燃烧概率画成半透明的暖红色（概率越高越浓），中位数到达时间每小时一条等时线
   if (uHasForecast) {
     vec2 p = vCell / uForecastScale - 0.5;
@@ -421,6 +465,8 @@ export class Terrain {
     verticalScale = 1.5,
     /** 合成网格：把社区外的不可燃区域当作溪流；真实数据只把海平面附近的区域当作水面 */
     inferStreams = true,
+    /** 可选：每格的燃料类别（FuelGroup）。提供时用它着色，并用其中的水体判断水面 */
+    fuelGroups?: Uint8Array,
   ) {
     const { width, height, cellSize } = grid.meta;
     this._verticalScale = verticalScale;
@@ -475,6 +521,8 @@ export class Terrain {
           uRetardant: { value: new THREE.Color("#D63A73") },
           uPerimeter: { value: null },
           uHasPerimeter: { value: false },
+          uDamage: { value: null },
+          uHasDamage: { value: false },
           uForecast: { value: null },
           uHasForecast: { value: false },
           uForecastSize: { value: new THREE.Vector2(1, 1) },
@@ -488,6 +536,11 @@ export class Terrain {
           uHasSatellite: { value: false },
           // 建筑格的地面：有 3D 房屋后不再画成浅白块，改为院落草地与铺装的混合色
           uNatural: { value: ["#a89a63", "#3d5a2c", "#9e8550", "#9c9a84"].map((c) => new THREE.Color(c)) },
+          uFuelGroup: { value: null },
+          uHasFuelGroup: { value: false },
+          uFuelColors: {
+            value: [FuelGroup.Grass, FuelGroup.GrassShrub, FuelGroup.Shrub, FuelGroup.Timber].map((g) => new THREE.Color(FUEL_GROUP_COLORS[g])),
+          },
           uClassColors: {
             value: [CLASS_COLORS.unburnable, CLASS_COLORS.vegetation, CLASS_COLORS.building].map((c) => new THREE.Color(c)),
           },
@@ -496,7 +549,15 @@ export class Terrain {
     });
     // UniformsUtils.merge 会克隆纹理，所以在合并之后再赋值
     material.uniforms.uGrid.value = this.gridTexture;
-    material.uniforms.uWater.value = buildWaterTexture(grid, inferStreams);
+    material.uniforms.uWater.value = buildWaterTexture(grid, inferStreams, fuelGroups);
+    if (fuelGroups) {
+      const tex = new THREE.DataTexture(fuelGroups, width, height, THREE.RedFormat, THREE.UnsignedByteType);
+      tex.minFilter = THREE.NearestFilter;
+      tex.magFilter = THREE.NearestFilter;
+      tex.needsUpdate = true;
+      material.uniforms.uFuelGroup.value = tex;
+      material.uniforms.uHasFuelGroup.value = true;
+    }
 
     this.mesh = new THREE.Mesh(geo, material);
     // 几何体是平的，位移在 GPU 上完成，包围体不可信
@@ -552,6 +613,35 @@ export class Terrain {
     tex.needsUpdate = true;
     this.uniforms.uPerimeter.value = tex;
     this.uniforms.uHasPerimeter.value = true;
+  }
+
+  /** 报告受损区域：建筑格向外扩 dilate 格后连成一片，画成虚线轮廓；传 null 清除 */
+  setDamageArea(cells: number[] | null, dilate = 3) {
+    const { width: W, height: H } = this.grid.meta;
+    (this.uniforms.uDamage.value as THREE.DataTexture | null)?.dispose();
+    this.uniforms.uHasDamage.value = false;
+    if (!cells?.length) return;
+    const mask = new Uint8Array(W * H);
+    for (const c of cells) {
+      const x = c % W;
+      const y = Math.floor(c / W);
+      for (let dy = -dilate; dy <= dilate; dy++)
+        for (let dx = -dilate; dx <= dilate; dx++) {
+          const xx = x + dx;
+          const yy = y + dy;
+          if (dx * dx + dy * dy <= dilate * dilate && xx >= 0 && yy >= 0 && xx < W && yy < H) mask[yy * W + xx] = 255;
+        }
+    }
+    const tex = new THREE.DataTexture(mask, W, H, THREE.RedFormat, THREE.UnsignedByteType);
+    tex.minFilter = THREE.NearestFilter;
+    tex.magFilter = THREE.NearestFilter;
+    tex.needsUpdate = true;
+    this.uniforms.uDamage.value = tex;
+  }
+
+  /** 显示或隐藏报告受损区域（只在 Respond 模式显示） */
+  showDamageArea(show: boolean) {
+    this.uniforms.uHasDamage.value = show && !!this.uniforms.uDamage.value;
   }
 
   /** 显示集合预报（texture 为统计纹理，size 为其边长，scale 为每个预报格对应的网格格数）；传 null 隐藏 */
