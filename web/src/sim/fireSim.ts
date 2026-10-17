@@ -35,6 +35,8 @@ export class FireSim {
   private lastStats: FireStats;
   /** 最近一次读回时正在燃烧的格子（抽样，最多 SAMPLE_CAP 个），供烟雾等效果使用 */
   burningSample: number[] = [];
+  /** 与 burningSample 一一对应的火势强度权重（燃料 × 干燥度 × 燃烧新鲜度） */
+  burningWeight: number[] = [];
   /** burningSample 每更新一次加 1 */
   sampleVersion = 0;
   /** 最近一次读回的完整状态（RGBA，每格 4 个 float）；尚未读回时为 null */
@@ -102,6 +104,11 @@ export class FireSim {
     return this.targets[this.cur].texture;
   }
 
+  /** 最近一次读回对应的模拟时间（分钟） */
+  get lastStatsMinutes(): number {
+    return this.lastStats.minutes;
+  }
+
   get minutes(): number {
     return this.step * SpreadParams.stepMinutes;
   }
@@ -126,6 +133,7 @@ export class FireSim {
   reset() {
     this.step = 0;
     this.burningSample = [];
+    this.burningWeight = [];
     this.lastState = null;
     this.sampleVersion++;
     this.render(this.resetMat);
@@ -174,7 +182,7 @@ export class FireSim {
       this.renderer
         .readRenderTargetPixelsAsync(this.targets[this.cur], 0, 0, this.width, this.height, this.readBuf)
         .then(() => {
-          this.lastStats = summarize(this.readBuf, this.grid, minutes, this.burningSample);
+          this.lastStats = summarize(this.readBuf, this.grid, minutes, this.burningSample, this.burningWeight);
           this.lastState = this.readBuf;
           this.sampleVersion++;
         })
@@ -193,7 +201,7 @@ export class FireSim {
   /** 同步读回并统计，同时刷新燃烧格抽样 */
   statsSync(): FireStats {
     const state = this.readState();
-    this.lastStats = summarize(state, this.grid, this.minutes, this.burningSample);
+    this.lastStats = summarize(state, this.grid, this.minutes, this.burningSample, this.burningWeight);
     this.lastState = state;
     this.sampleVersion++;
     return this.lastStats;
@@ -202,7 +210,7 @@ export class FireSim {
 
 const SAMPLE_CAP = 4096;
 
-export function summarize(state: Float32Array, grid: Grid, minutes: number, burningOut?: number[]): FireStats {
+export function summarize(state: Float32Array, grid: Grid, minutes: number, burningOut?: number[], weightOut?: number[]): FireStats {
   let burning = 0;
   let burned = 0;
   let buildings = 0;
@@ -216,13 +224,26 @@ export function summarize(state: Float32Array, grid: Grid, minutes: number, burn
     }
   }
   if (burningOut) {
-    // 等间隔抽样，火线很长时也只取 SAMPLE_CAP 个
+    // 等间隔抽样，火线很长时也只取 SAMPLE_CAP 个；同时给出火势强度权重：
+    // 燃料 ×（0.5 + 干燥度）× 新鲜度。新鲜度按燃烧进度（G 通道已燃步数 / 该格燃烧时长，与 CA 规则一致）
+    // 从 1 降到 0.1，所以刚被点燃、燃料最重的火线权重最大，快燃尽的燃烧带后部权重最小
     burningOut.length = 0;
+    if (weightOut) weightOut.length = 0;
     const stride = Math.max(1, Math.ceil(burning / SAMPLE_CAP));
     let k = 0;
     for (let c = 0; c < n; c++) {
       const s = state[c * 4];
-      if (s > 0.5 && s < 1.5 && k++ % stride === 0) burningOut.push(c);
+      if (!(s > 0.5 && s < 1.5) || k++ % stride !== 0) continue;
+      burningOut.push(c);
+      if (weightOut) {
+        const g = c * GRID_CHANNELS;
+        const fuel = grid.data[g + 1];
+        const dry = grid.data[g + 2];
+        const isBuilding = grid.data[g + 3] === CellClass.Building;
+        const dur = isBuilding ? 8 : 2 + Math.floor(3 * fuel + 0.5);
+        const fresh = 1 - 0.9 * Math.min(1, state[c * 4 + 1] / dur);
+        weightOut.push((isBuilding ? 1.2 : Math.max(0.05, fuel)) * (0.5 + dry) * fresh);
+      }
     }
   }
   const cellHa = (grid.meta.cellSize * grid.meta.cellSize) / 1e4;

@@ -267,6 +267,7 @@ ctx.renderer.domElement.addEventListener("pointerup", (e) => {
 // ---- 每帧 ----
 let checkLine = ""; // CPU 对照结果（调试 HUD）
 let uiTimer = 0;
+let readTimer = 0;
 let stepAcc = 0;
 let sampleSeen = -1;
 ctx.onFrame((dt) => {
@@ -291,16 +292,20 @@ ctx.onFrame((dt) => {
   props.update(ctx.camera);
   smoke.update(dt, propMaterial.uniforms.uTime.value);
 
+  // 运行中每 0.12 秒异步读回一次（约 2–3 步），烟源紧跟火线；暂停时放慢到 0.5 秒
+  readTimer += dt;
+  if (simActive && readTimer >= (simParams.running ? 0.12 : 0.5)) {
+    readTimer = 0;
+    sim.stats();
+  }
+  if (simActive && sim.sampleVersion !== sampleSeen && sim.lastState) {
+    sampleSeen = sim.sampleVersion;
+    smoke.setSources(sim.burningSample, sim.burningWeight);
+    monitor.update(sim.lastState, sim.burningSample, sim.lastStatsMinutes);
+  }
   uiTimer += dt;
   if (uiTimer < 0.5) return;
   uiTimer = 0;
-  // 每 0.5 秒异步读回一次：统计、烟源与社区监测都用这次读回
-  const fs = simActive ? sim.stats() : null;
-  if (simActive && sim.sampleVersion !== sampleSeen && sim.lastState) {
-    sampleSeen = sim.sampleVersion;
-    smoke.setSources(sim.burningSample);
-    monitor.update(sim.lastState, sim.burningSample, fs?.minutes ?? sim.minutes);
-  }
   refreshPanels();
 });
 
@@ -463,7 +468,7 @@ if (igniteQ?.length === 2 && igniteQ.every(Number.isFinite)) {
   }
   sim.statsSync();
   sampleSeen = sim.sampleVersion;
-  smoke.setSources(sim.burningSample);
+  smoke.setSources(sim.burningSample, sim.burningWeight);
   smoke.warmup(smoke.material.uniforms.uLife.value, 0);
   refreshPanels();
 }

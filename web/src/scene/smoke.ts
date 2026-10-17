@@ -120,6 +120,8 @@ export class Smoke {
   private next = 0;
   private acc = 0;
   private sources: number[] = [];
+  /** 按火势强度的累积分布，用于加权抽取烟源 */
+  private cdf: Float64Array = new Float64Array(0);
   private cellWind: Float32Array;
   private rng = 1;
 
@@ -171,9 +173,28 @@ export class Smoke {
     this.object.renderOrder = 10;
   }
 
-  /** 烟源：正在燃烧的格子 */
-  setSources(cells: number[]) {
+  /** 烟源：正在燃烧的格子；weights 为火势强度，烟更多地从燃烧最猛的地方升起 */
+  setSources(cells: number[], weights?: number[]) {
     this.sources = cells.slice();
+    this.cdf = new Float64Array(cells.length);
+    let acc = 0;
+    for (let i = 0; i < cells.length; i++) {
+      acc += weights ? weights[i] : 1;
+      this.cdf[i] = acc;
+    }
+  }
+
+  private pickSource(): number {
+    const total = this.cdf[this.cdf.length - 1];
+    const r = this.random() * total;
+    let lo = 0;
+    let hi = this.cdf.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.cdf[mid] < r) lo = mid + 1;
+      else hi = mid;
+    }
+    return this.sources[lo];
   }
 
   setWind(cellWind: Float32Array) {
@@ -185,6 +206,7 @@ export class Smoke {
     (this.spawn.array as Float32Array).fill(-1e6);
     this.spawn.needsUpdate = true;
     this.sources = [];
+    this.cdf = new Float64Array(0);
   }
 
   private random(): number {
@@ -219,7 +241,7 @@ export class Smoke {
     const wind = this.wind.array as Float32Array;
     const first = this.next;
     for (let i = 0; i < n; i++) {
-      const c = this.sources[Math.floor(this.random() * this.sources.length)];
+      const c = this.pickSource();
       const gx = (c % W) + this.random() - 0.5;
       const gy = Math.floor(c / W) + this.random() - 0.5;
       const j = this.next;
