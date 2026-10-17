@@ -1151,7 +1151,8 @@ body.painting #app canvas {
   bottom: calc(var(--bottombar-h) + 30px);
   z-index: 15;
   width: 240px;
-  padding: 8px 10px;
+  /* 内边距略大于其他浮层：标题行的下拉框带边框，太贴边会显得局促 */
+  padding: 12px 14px;
   font-size: var(--t-13);
 }
 
@@ -1163,7 +1164,8 @@ body.painting #app canvas {
 
 .legend-head .select {
   flex: 1;
-  height: 28px;
+  min-width: 0;
+  height: 30px;
 }
 
 .legend-static {
@@ -1204,7 +1206,7 @@ body.painting #app canvas {
 }
 
 .legend-body {
-  margin-top: 6px;
+  margin-top: 10px;
 }
 
 .map-legend.collapsed .legend-body {
