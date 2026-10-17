@@ -885,3 +885,13 @@ body.painting #app canvas {
 .forecast-show {
   margin-top: 8px;
 }
+
+/* width 0 + min-width 100%：说明文字随卡片宽度换行，不会把卡片撑宽 */
+.legend-note {
+  width: 0;
+  min-width: 100%;
+  margin-top: 6px;
+  font-size: var(--t-11, 11px);
+  color: var(--ink-muted);
+  line-height: 1.3;
+}

@@ -67,6 +67,8 @@ uniform vec3 uNatural[4];
 uniform sampler2D uFuelGroup; // 可选：LANDFIRE 燃料类别（R × 255 = FuelGroup），Natural 图层按类别着色
 uniform bool uHasFuelGroup;
 uniform vec3 uFuelColors[4];  // 草地、草灌、灌丛、林地
+uniform int uDevPalette;      // 建成区配色：0 暖灰混凝土，1 灌溉绿地，2 深色退后，3 混合（建成区用卫星影像）
+uniform bool uSatDetail;      // 混合方案：卫星影像只用于建成区，并给野外的燃料配色加上影像的明暗纹理
 uniform float uNight; // 0 白天（Plan）到 1 夜间（Respond）
 uniform sampler2D uWater; // R 河岸有向距离（米），G 路缘有向距离（米），BA 水流方向
 uniform vec3 uSkyColor;   // 水面反射的天空颜色，随模式变化
@@ -219,13 +221,36 @@ void main() {
       vec3 veg = mix(mix(uNatural[0], uNatural[1], cover), uNatural[2], dryness * 0.25);
       // 有 LANDFIRE 燃料类别时按类别着色：枯草是草黄色，不会因为燃料值高被画成深绿灌丛
       if (uHasFuelGroup) veg = mix(fuelColor(vCell, veg), uNatural[2], dryness * 0.15);
-      col = vb.x * veg + vb.y * uNatural[3];
+      // 建成区（不可燃城区与建筑格的地面）的配色方案，只在有燃料类别时生效
+      vec3 devGround = uNatural[3];
+      vec3 devPaved = vec3(0.47, 0.46, 0.43) * (0.94 + 0.12 * vnoise(vWorldXZ * 0.02));
+      if (uHasFuelGroup && uDevPalette == 1) {
+        // 灌溉绿地：南加州社区从空中看是灰绿色的树冠与草坪，与金黄的枯草山坡对比
+        // 白天光照会把颜色整体提亮约 1.2 倍，所以基色取得偏深
+        float canopy = smoothstep(0.5, 0.8, vnoise(vWorldXZ * 0.085));
+        float roofs = smoothstep(0.72, 0.88, vnoise(vWorldXZ * 0.21 + 7.3));
+        vec3 sage = mix(vec3(0.33, 0.39, 0.29), vec3(0.22, 0.29, 0.2), canopy * 0.7);
+        devPaved = mix(sage, vec3(0.5, 0.48, 0.44), roofs * 0.25);
+        devGround = devPaved;
+      } else if (uHasFuelGroup && uDevPalette == 2) {
+        // 深色退后：建成区沉到背景，野外燃料与火线最突出
+        devPaved = vec3(0.2, 0.195, 0.185) * (0.92 + 0.16 * vnoise(vWorldXZ * 0.03));
+        devGround = devPaved * 1.1;
+      } else if (uHasFuelGroup && uSatDetail) {
+        vec3 sat = texture(uSatellite, vec2((vCell.x + 0.5) / uGridSize.x, 1.0 - (vCell.y + 0.5) / uGridSize.y)).rgb;
+        float lum = dot(sat, vec3(0.299, 0.587, 0.114));
+        devPaved = mix(vec3(lum), sat, 0.8) * 0.92;
+        devGround = devPaved;
+        // 野外仍按燃料类别着色，乘上影像的相对明暗：山脊、沟谷、小路的细节都在
+        veg *= clamp(0.55 + 1.6 * lum, 0.7, 1.3);
+      }
+      col = vb.x * veg + vb.y * (uHasFuelGroup ? devGround : uNatural[3]);
       // 河岸外 10 m 内略暗：湿润的河岸
       col *= 1.0 - 0.22 * smoothstep(10.0, 0.0, wf.r) * (1.0 - water);
       // 大片铺装（城区的停车场、硬化地面）离路缘较远处过渡到浅色混凝土，窄路仍是深色路面
       vec3 paved = mix(uClassColors[0], vec3(0.5, 0.5, 0.47), smoothstep(-10.0, -35.0, wf.g));
       // 有燃料类别时，不可燃区域几乎都是城区（道路无法单独识别），统一画成暖灰色的建成区地面
-      if (uHasFuelGroup) paved = vec3(0.47, 0.46, 0.43) * (0.94 + 0.12 * vnoise(vWorldXZ * 0.02));
+      if (uHasFuelGroup) paved = devPaved;
       col = mix(col, paved, road);
     }
   } else if (uLayer == 1) {
@@ -538,6 +563,8 @@ export class Terrain {
           uNatural: { value: ["#a89a63", "#3d5a2c", "#9e8550", "#9c9a84"].map((c) => new THREE.Color(c)) },
           uFuelGroup: { value: null },
           uHasFuelGroup: { value: false },
+          uDevPalette: { value: 0 },
+          uSatDetail: { value: false },
           uFuelColors: {
             value: [FuelGroup.Grass, FuelGroup.GrassShrub, FuelGroup.Shrub, FuelGroup.Timber].map((g) => new THREE.Color(FUEL_GROUP_COLORS[g])),
           },
@@ -651,6 +678,13 @@ export class Terrain {
     this.uniforms.uForecast.value = texture;
     this.uniforms.uForecastSize.value.set(size, size);
     this.uniforms.uForecastScale.value = scale;
+  }
+
+  /** 混合方案：卫星影像只用于建成区，并作为野外燃料配色的明暗纹理 */
+  setSatelliteDetail(tex: THREE.Texture) {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this.uniforms.uSatellite.value = tex;
+    this.uniforms.uSatDetail.value = true;
   }
 
   setSatellite(tex: THREE.Texture) {

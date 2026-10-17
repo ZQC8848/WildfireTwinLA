@@ -52,20 +52,30 @@ if (groups) {
     { label: "Cured grass", color: FUEL_GROUP_COLORS[FuelGroup.Grass]! },
     { label: "Grass and sage scrub", color: FUEL_GROUP_COLORS[FuelGroup.GrassShrub]! },
     { label: "Chaparral and woodland", color: FUEL_GROUP_COLORS[FuelGroup.Shrub]! },
-    { label: "Neighborhoods", color: "#9c9a84" },
-    { label: "Developed land and roads", color: "#78766e" },
+    { label: "Developed land (satellite image)", color: "#8a8478" },
     { label: "Water", color: "#3f5f6a" },
   ];
+  // Copernicus 数据使用条款要求注明出处
+  LAYERS.natural.note = "Fuels: LANDFIRE FBFM40, fall 2026. Image: modified Copernicus Sentinel-2 data, Oct 14, 2026.";
 }
 ctx.scene.add(terrain.mesh);
 
-// Tia 导出与网格对齐的真彩色底图后自动启用；合成网格没有对应底图
-if (bundle.source === "real") {
+// 建成区配色。默认 hybrid：城区用与网格对齐的 Sentinel-2 真彩色底图（data/satellite.jpg），
+// 野外保留燃料配色并叠加影像的明暗纹理。底图缺失时退回 concrete（暖灰）。
+// 对比用：?palette=concrete | sage | recede | hybrid | satellite（satellite 为整片影像，不显示燃料类别）
+const PALETTES = ["concrete", "sage", "recede", "hybrid"];
+const paletteQ = q.get("palette") ?? (groups ? "hybrid" : "concrete");
+terrain.uniforms.uDevPalette.value = Math.max(0, PALETTES.indexOf(paletteQ));
+if (bundle.source === "real" && (paletteQ === "satellite" || paletteQ === "hybrid")) {
   new THREE.TextureLoader().load(
     `${import.meta.env.BASE_URL}data/satellite.jpg`,
-    (tex) => terrain.setSatellite(tex),
+    (tex) => (paletteQ === "hybrid" ? terrain.setSatelliteDetail(tex) : terrain.setSatellite(tex)),
     undefined,
-    () => console.info("[main] No satellite.jpg; using synthetic natural colors"),
+    () => {
+      console.info("[main] No satellite.jpg; using synthetic natural colors");
+      terrain.uniforms.uDevPalette.value = 0;
+      LAYERS.natural.note = undefined;
+    },
   );
 }
 

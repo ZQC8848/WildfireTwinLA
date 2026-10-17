@@ -66,6 +66,14 @@ wildfire-communities \
   --output ../web/public/data/communities.json
 ```
 
+Build the grid-aligned true-color basemap `satellite.jpg` from the last low-cloud Sentinel-2 L2A
+scene before the fire (10 m TCI, MGRS tiles mosaicked). The frontend uses it for developed land and
+as texture for the fuel colors. Attribution: "Contains modified Copernicus Sentinel data".
+
+```bash
+wildfire-basemap --grid-dir ../web/public/data --before 2026-10-16T18:30:00Z
+```
+
 Build the best available Norte perimeter (NIFC WFIGS, else a Sentinel-2 dNBR burn scar when
 `--pre-nir/--pre-swir/--post-nir/--post-swir` are given, else the coarse VIIRS-detected area),
 and flag buildings along the streets where OCFA reported damage:

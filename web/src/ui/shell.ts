@@ -401,7 +401,8 @@ export class Shell {
     } else if (def.swatches) {
       body = def.swatches.map((s) => `<div class="swatch"><i style="background:${s.color}"></i>${s.label}</div>`).join("");
     }
-    this.q<HTMLDivElement>("#legend").innerHTML = `<div class="legend-title">${def.label}</div>${body}`;
+    const note = def.note ? `<div class="legend-note">${esc(def.note)}</div>` : "";
+    this.q<HTMLDivElement>("#legend").innerHTML = `<div class="legend-title">${def.label}</div>${body}${note}`;
   }
 
   // ---- 悬停信息 ----

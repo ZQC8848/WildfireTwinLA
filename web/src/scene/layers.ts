@@ -10,6 +10,8 @@ export interface LayerDef {
   ramp?: [string, string, string, string];
   rampLabels?: [string, string];
   swatches?: { label: string; color: string }[];
+  /** 图例底部的小字说明（如数据署名） */
+  note?: string;
 }
 
 export const CLASS_COLORS = {

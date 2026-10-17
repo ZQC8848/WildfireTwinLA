@@ -29,6 +29,7 @@ web/public/data/*
 !web/public/data/.gitkeep
 !web/public/data/*.json
 !web/public/data/*.bin
+!web/public/data/satellite.jpg
 !web/public/data/wind/
 !web/public/data/wind/index.json
 !web/public/data/wind/wind-library.bin

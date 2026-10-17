@@ -225,7 +225,13 @@ web/
 > - 相机预设（`scene/cameraRig.ts`）：Overview / Fire front / Community，三次缓动平滑过渡，快捷键 1 / 2 / 3，用户拖动即中止；减少动态效果时直接跳转。火头视角从风向侧面、偏上风的高处看，烟不挡镜头。
 > - Bloom（`scene/post.ts`）：HalfFloat 渲染目标 + UnrealBloomPass，阈值 1.0，只有火线、燃烧中的模型、火点标记泛光；Respond 下更强。`?bloom=0` 关闭。
 > - 建筑风险着色、烟雾已在 P1.6 / P2 完成。
-> - 待做：卫星底图（等真实网格数据）；Google 3D Tiles（可选）。
+> - 卫星底图已完成（2026-10-17）：`wildfire-basemap` 生成与网格对齐的 Sentinel-2 真彩色图（10-14 起火前那一景，10 m）。默认采用"混合"配色：
+>   - 建成区用卫星影像；
+>   - 野外保留 LANDFIRE 燃料配色，并乘上影像的明暗纹理；
+>   - 图例注明 LANDFIRE 和 Copernicus 的来源。
+>
+>   用 `?palette=concrete|sage|recede|hybrid|satellite` 可以切换对比。暖灰、灌溉绿地、深色退后和纯卫星这几种方案都比较过，最后选了混合。
+> - 待做：Google 3D Tiles（可选）。
 > - 调试 URL：`?view=overview|fire|community`。
 
 ### P5.5 切换到 Norte Fire（2026-10-17）
