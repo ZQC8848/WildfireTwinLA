@@ -1,0 +1,1 @@
+{"label":"SYNTHETIC TEST ONLY — NOT EATON", "arrivalSteps":[0,1,2,3,null],"calibrationDetections":[{"cell":1,"minutes":5},{"cell":2,"minutes":10}],"validationDetections":[{"cell":3,"minutes":17}],"perimeters":[{"minutes":10,"cells":[0,1,2]}],"gpuArrivalMinutes":[0,6,11,16,null]}
