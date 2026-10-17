@@ -21,3 +21,53 @@ body {
   pointer-events: none;
   white-space: pre;
 }
+#panels {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+  pointer-events: none;
+}
+.legend,
+.info {
+  min-width: 200px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(13, 17, 23, 0.8);
+}
+.legend-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.ramp {
+  height: 10px;
+  border-radius: 2px;
+}
+.ramp-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+  color: #9da7b3;
+  font-size: 11px;
+}
+.swatch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0;
+}
+.swatch i {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+.info {
+  white-space: pre;
+  font-variant-numeric: tabular-nums;
+}
+.info:empty {
+  display: none;
+}
