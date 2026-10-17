@@ -10,6 +10,10 @@ export interface SceneContext {
   stats: Stats;
   /** 每帧回调，参数为距上一帧的秒数 */
   onFrame: (fn: (dt: number) => void) => void;
+  /** 每帧的绘制函数，默认直接渲染场景；后处理（Bloom）会替换它 */
+  render: () => void;
+  /** 画布尺寸变化时的回调 */
+  onResize: (fn: (w: number, h: number) => void) => void;
 }
 
 export function createScene(container: HTMLElement): SceneContext {
@@ -42,14 +46,17 @@ export function createScene(container: HTMLElement): SceneContext {
   scene.add(sun);
 
   const stats = new Stats();
-  stats.dom.style.cssText = "position:fixed;top:0;left:0;";
+  stats.dom.style.cssText = "position:fixed;top:60px;right:8px;left:auto;z-index:30;";
+  stats.dom.classList.add("stats");
   document.body.appendChild(stats.dom);
 
   window.addEventListener("resize", () => {
     camera.aspect = container.clientWidth / container.clientHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(container.clientWidth, container.clientHeight);
+    for (const fn of resizeCallbacks) fn(container.clientWidth, container.clientHeight);
   });
+  const resizeCallbacks: ((w: number, h: number) => void)[] = [];
 
   const callbacks: ((dt: number) => void)[] = [];
   const timer = new THREE.Timer();
@@ -58,9 +65,19 @@ export function createScene(container: HTMLElement): SceneContext {
     const dt = timer.getDelta();
     for (const fn of callbacks) fn(dt);
     controls.update();
-    renderer.render(scene, camera);
+    ctx.render();
     stats.update();
   });
 
-  return { renderer, scene, camera, controls, stats, onFrame: (fn) => callbacks.push(fn) };
+  const ctx: SceneContext = {
+    renderer,
+    scene,
+    camera,
+    controls,
+    stats,
+    onFrame: (fn) => callbacks.push(fn),
+    render: () => renderer.render(scene, camera),
+    onResize: (fn) => resizeCallbacks.push(fn),
+  };
+  return ctx;
 }

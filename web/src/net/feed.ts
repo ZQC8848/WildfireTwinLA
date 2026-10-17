@@ -1,0 +1,138 @@
+// 数据源客户端：
+// - live：连接后端 WS /ws?mode=live，断线后按指数退避重连，定时发送 ping
+// - replay：连接 /ws?mode=replay&event=eaton；后端连不上时，改为在浏览器内按同样的时间间隔播放
+//   仓库里的 server/data/eaton-replay.jsonl（与后端读取的是同一份文件），演示不依赖后端
+
+import type { GridMeta } from "@core";
+import replaySeed from "../../../server/data/eaton-replay.jsonl?raw";
+import { normalize, type FeedEvent } from "./messages";
+
+export type FeedMode = "off" | "live" | "replay";
+export type FeedState = "idle" | "connecting" | "connected" | "local" | "retrying" | "ended";
+
+// 后端地址：URL 参数 ?api= 优先（调试），其次构建时的 VITE_API_URL，默认本地 8010
+const API =
+  new URLSearchParams(location.search).get("api") ?? (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8010";
+
+export class FeedClient {
+  mode: FeedMode = "off";
+  state: FeedState = "idle";
+  private ws: WebSocket | null = null;
+  private timers: number[] = [];
+  private retry = 0;
+  private generation = 0;
+
+  constructor(
+    private meta: GridMeta,
+    private onEvent: (e: FeedEvent) => void,
+    private onState: (state: FeedState, detail: string) => void,
+    /** 回放倍速（后端的 speed 参数，事件间隔 ÷ speed） */
+    public replaySpeed = 1,
+  ) {}
+
+  start(mode: FeedMode) {
+    this.stop();
+    this.mode = mode;
+    if (mode === "off") return this.setState("idle", "");
+    this.open();
+  }
+
+  stop() {
+    this.generation++;
+    this.timers.forEach((t) => clearTimeout(t));
+    this.timers = [];
+    if (this.ws) {
+      this.ws.onclose = null;
+      this.ws.close();
+      this.ws = null;
+    }
+    this.retry = 0;
+  }
+
+  private setState(state: FeedState, detail: string) {
+    this.state = state;
+    this.onState(state, detail);
+  }
+
+  private wsUrl(): string {
+    const base = API.replace(/^http/, "ws");
+    return this.mode === "live" ? `${base}/ws?mode=live` : `${base}/ws?mode=replay&event=eaton&speed=${this.replaySpeed}`;
+  }
+
+  private open() {
+    const gen = this.generation;
+    this.setState("connecting", API);
+    let opened = false;
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(this.wsUrl());
+    } catch {
+      return this.fail(gen, false);
+    }
+    this.ws = ws;
+    ws.onopen = () => {
+      if (gen !== this.generation) return;
+      opened = true;
+      this.retry = 0;
+      this.setState("connected", API);
+      if (this.mode === "live") this.ping(gen);
+    };
+    ws.onmessage = (m) => {
+      if (gen !== this.generation || typeof m.data !== "string" || m.data === "pong") return;
+      try {
+        const e = normalize(JSON.parse(m.data), this.meta);
+        if (e) this.onEvent(e);
+      } catch {
+        /* 忽略无法解析的消息 */
+      }
+    };
+    ws.onclose = () => {
+      if (gen !== this.generation) return;
+      this.ws = null;
+      if (this.mode === "replay" && opened) return this.setState("ended", "Replay finished");
+      this.fail(gen, opened);
+    };
+  }
+
+  private fail(gen: number, wasOpen: boolean) {
+    if (gen !== this.generation) return;
+    if (this.mode === "replay") return this.playLocal(gen);
+    // live：指数退避重连，最长 30 秒
+    const delay = Math.min(30000, 1000 * 2 ** this.retry++);
+    this.setState("retrying", `${wasOpen ? "Connection lost" : "Cannot reach the server"}; retrying in ${Math.round(delay / 1000)} s`);
+    this.timers.push(window.setTimeout(() => gen === this.generation && this.open(), delay));
+  }
+
+  private ping(gen: number) {
+    this.timers.push(
+      window.setTimeout(() => {
+        if (gen !== this.generation || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+        this.ws.send("ping");
+        this.ping(gen);
+      }, 20000),
+    );
+  }
+
+  /** 后端不可用时在浏览器内播放回放文件 */
+  private playLocal(gen: number) {
+    this.setState("local", "Server unavailable; playing the bundled replay");
+    const lines = replaySeed
+      .split("\n")
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l))
+      .sort((a, b) => (a.offsetSeconds ?? 0) - (b.offsetSeconds ?? 0));
+    let last = 0;
+    for (const raw of lines) {
+      const at = ((raw.offsetSeconds ?? 0) * 1000) / Math.max(0.1, this.replaySpeed);
+      last = Math.max(last, at);
+      this.timers.push(
+        window.setTimeout(() => {
+          if (gen !== this.generation) return;
+          const e = normalize(raw, this.meta);
+          if (e) this.onEvent(e);
+        }, at),
+      );
+    }
+    this.timers.push(window.setTimeout(() => gen === this.generation && this.setState("ended", "Replay finished"), last + 500));
+  }
+}
