@@ -33,6 +33,10 @@ export class FireSim {
   private readBuf: Float32Array;
   private reading = false;
   private lastStats: FireStats;
+  /** 最近一次读回时正在燃烧的格子（抽样，最多 SAMPLE_CAP 个），供烟雾等效果使用 */
+  burningSample: number[] = [];
+  /** burningSample 每更新一次加 1 */
+  sampleVersion = 0;
 
   constructor(
     private renderer: THREE.WebGLRenderer,
@@ -119,6 +123,8 @@ export class FireSim {
 
   reset() {
     this.step = 0;
+    this.burningSample = [];
+    this.sampleVersion++;
     this.render(this.resetMat);
     this.render(this.resetMat);
     this.lastStats = { minutes: 0, burningCells: 0, burnedCells: 0, burnedAreaHa: 0, buildingCellsBurned: 0 };
@@ -165,22 +171,32 @@ export class FireSim {
       this.renderer
         .readRenderTargetPixelsAsync(this.targets[this.cur], 0, 0, this.width, this.height, this.readBuf)
         .then(() => {
-          this.lastStats = summarize(this.readBuf, this.grid, minutes);
+          this.lastStats = summarize(this.readBuf, this.grid, minutes, this.burningSample);
+          this.sampleVersion++;
         })
         .finally(() => (this.reading = false));
     }
     return this.lastStats;
   }
 
-  /** 同步读回整张状态（CPU 对照用） */
+  /** 同步读回整张状态（CPU 对照、调试用） */
   readState(): Float32Array {
     const out = new Float32Array(this.width * this.height * 4);
     this.renderer.readRenderTargetPixels(this.targets[this.cur], 0, 0, this.width, this.height, out);
     return out;
   }
+
+  /** 同步读回并统计，同时刷新燃烧格抽样 */
+  statsSync(): FireStats {
+    this.lastStats = summarize(this.readState(), this.grid, this.minutes, this.burningSample);
+    this.sampleVersion++;
+    return this.lastStats;
+  }
 }
 
-export function summarize(state: Float32Array, grid: Grid, minutes: number): FireStats {
+const SAMPLE_CAP = 4096;
+
+export function summarize(state: Float32Array, grid: Grid, minutes: number, burningOut?: number[]): FireStats {
   let burning = 0;
   let burned = 0;
   let buildings = 0;
@@ -191,6 +207,16 @@ export function summarize(state: Float32Array, grid: Grid, minutes: number): Fir
     if (s > 0.5) {
       burned++;
       if (grid.data[c * GRID_CHANNELS + 3] === CellClass.Building) buildings++;
+    }
+  }
+  if (burningOut) {
+    // 等间隔抽样，火线很长时也只取 SAMPLE_CAP 个
+    burningOut.length = 0;
+    const stride = Math.max(1, Math.ceil(burning / SAMPLE_CAP));
+    let k = 0;
+    for (let c = 0; c < n; c++) {
+      const s = state[c * 4];
+      if (s > 0.5 && s < 1.5 && k++ % stride === 0) burningOut.push(c);
     }
   }
   const cellHa = (grid.meta.cellSize * grid.meta.cellSize) / 1e4;

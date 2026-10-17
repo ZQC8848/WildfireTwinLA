@@ -3,7 +3,7 @@
 // GPU 用 float32、CPU 用 float64 计算概率，极少数临界格子会因舍入不同而分岔，所以对照看统计量而不是逐格相等。
 
 import { SpreadParams, type Grid, type WindField } from "@core";
-import { windFieldSamples, windToGrid } from "./wind";
+import { windGrid } from "./wind";
 
 function pcg(v: number): number {
   const state = (Math.imul(v >>> 0, 747796405) + 2891336453) >>> 0;
@@ -39,25 +39,7 @@ export class CpuFireSim {
     this.state = new Float32Array(this.W * this.H * 4);
     this.next = new Float32Array(this.W * this.H * 4);
     for (let c = 0; c < this.W * this.H; c++) this.state[c * 4 + 2] = -1;
-    this.wind = new Float32Array(this.W * this.H * 2);
-    const { width: ww, height: wh, samples } = windFieldSamples(windField);
-    const comps = samples.map(windToGrid);
-    for (let y = 0; y < this.H; y++)
-      for (let x = 0; x < this.W; x++) {
-        const px = (x / Math.max(1, this.W - 1)) * (ww - 1);
-        const py = (y / Math.max(1, this.H - 1)) * (wh - 1);
-        const x0 = Math.floor(px);
-        const y0 = Math.floor(py);
-        const x1 = Math.min(x0 + 1, ww - 1);
-        const y1 = Math.min(y0 + 1, wh - 1);
-        const fx = px - x0;
-        const fy = py - y0;
-        for (let k = 0; k < 2; k++) {
-          const a = comps[y0 * ww + x0][k] * (1 - fx) + comps[y0 * ww + x1][k] * fx;
-          const b = comps[y1 * ww + x0][k] * (1 - fx) + comps[y1 * ww + x1][k] * fx;
-          this.wind[(y * this.W + x) * 2 + k] = a * (1 - fy) + b * fy;
-        }
-      }
+    this.wind = windGrid(windField, this.W, this.H);
   }
 
   ignite(cells: number[]) {

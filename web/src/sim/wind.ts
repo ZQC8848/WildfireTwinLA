@@ -17,6 +17,30 @@ export function windFieldSamples(field: WindField): { width: number; height: num
   return "speedMs" in field ? { width: 1, height: 1, samples: [field] } : field;
 }
 
+/** 每个格子的风速分量 (向东, 向南)，插值方式与 shader 和 core.windAt 相同 */
+export function windGrid(field: WindField, W: number, H: number): Float32Array {
+  const { width: ww, height: wh, samples } = windFieldSamples(field);
+  const comps = samples.map(windToGrid);
+  const out = new Float32Array(W * H * 2);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const px = (x / Math.max(1, W - 1)) * (ww - 1);
+      const py = (y / Math.max(1, H - 1)) * (wh - 1);
+      const x0 = Math.floor(px);
+      const y0 = Math.floor(py);
+      const x1 = Math.min(x0 + 1, ww - 1);
+      const y1 = Math.min(y0 + 1, wh - 1);
+      const fx = px - x0;
+      const fy = py - y0;
+      for (let k = 0; k < 2; k++) {
+        const a = comps[y0 * ww + x0][k] * (1 - fx) + comps[y0 * ww + x1][k] * fx;
+        const b = comps[y1 * ww + x0][k] * (1 - fx) + comps[y1 * ww + x1][k] * fx;
+        out[(y * W + x) * 2 + k] = a * (1 - fy) + b * fy;
+      }
+    }
+  return out;
+}
+
 export class WindTexture {
   texture: THREE.DataTexture;
 

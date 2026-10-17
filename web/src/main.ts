@@ -13,7 +13,9 @@ import { createPropMaterial } from "./scene/props/propMaterial";
 import { PropField } from "./scene/props/propField";
 import { Wires } from "./scene/props/wires";
 import { Legend } from "./ui/legend";
-import { FireSim, summarize } from "./sim/fireSim";
+import { FireSim } from "./sim/fireSim";
+import { windGrid } from "./sim/wind";
+import { Smoke } from "./scene/smoke";
 import { CpuFireSim } from "./sim/cpuReference";
 import type { WindField } from "@core";
 
@@ -121,6 +123,7 @@ fTerrain
   .onChange((v: number) => {
     terrain.verticalScale = v;
     propMaterial.uniforms.uVScale.value = v;
+    smoke.material.uniforms.uVScale.value = v;
     props.invalidate();
     wires.rebuild(terrain.minElev, v);
   });
@@ -143,7 +146,10 @@ fScene
     props.invalidate();
   });
 fScene.add(sceneParams, "sway", 0, 3, 0.1).name("Wind sway").onChange((v: number) => (propMaterial.uniforms.uSway.value = v));
-fScene.add(sceneParams, "night", 0, 1, 0.01).name("Night").onChange((v: number) => (propMaterial.uniforms.uNight.value = v));
+fScene.add(sceneParams, "night", 0, 1, 0.01).name("Night").onChange((v: number) => {
+  propMaterial.uniforms.uNight.value = v;
+  smoke.material.uniforms.uNight.value = v;
+});
 
 // 燃烧预览：P2 的模拟完成前，用一个从山地向外扩张的圆环验证模型的燃烧与燃尽效果
 const burnCenter = new THREE.Vector2(0, -meta.height * meta.cellSize * 0.18);
@@ -162,6 +168,12 @@ fBurn.add(sceneParams, "burnSpeed", 10, 300, 10).name("Spread (m/s)");
 const simParams = { running: false, stepsPerSecond: 20, windSpeed: 8, windFrom: 45, spotting: true, igniteOnClick: true, seed: 1 };
 const windField = (): WindField => ({ speedMs: simParams.windSpeed, dirFromDeg: simParams.windFrom });
 const sim = new FireSim(ctx.renderer, grid, terrain.gridTexture, windField());
+const smoke = new Smoke(grid, windGrid(windField(), meta.width, meta.height), terrain.minElev, terrain.verticalScale);
+ctx.scene.add(smoke.object);
+const applyWind = () => {
+  sim.setWind(windField());
+  smoke.setWind(windGrid(windField(), meta.width, meta.height));
+};
 let simActive = false;
 let simLine = "Fire: click the terrain to ignite";
 let checkLine = "";
@@ -176,6 +188,7 @@ const activateSim = () => {
 };
 const resetSim = () => {
   sim.reset();
+  smoke.clear();
   simParams.running = false;
 };
 
@@ -250,15 +263,21 @@ fSim.add(simParams, "running").name("Run");
 fSim.add({ step: () => (activateSim(), sim.advance(1)) }, "step").name("Step once");
 fSim.add({ reset: resetSim }, "reset").name("Reset");
 fSim.add(simParams, "stepsPerSecond", 1, 60, 1).name("Steps per second");
-fSim.add(simParams, "windSpeed", 0, 30, 0.5).name("Wind speed (m/s)").onChange(() => sim.setWind(windField()));
-fSim.add(simParams, "windFrom", 0, 359, 1).name("Wind from (°)").onChange(() => sim.setWind(windField()));
+fSim.add(simParams, "windSpeed", 0, 30, 0.5).name("Wind speed (m/s)").onChange(applyWind);
+fSim.add(simParams, "windFrom", 0, 359, 1).name("Wind from (°)").onChange(applyWind);
 fSim.add(simParams, "spotting").name("Spotting (embers)").onChange((v: boolean) => (sim.spotting = v));
 fSim.add(simParams, "igniteOnClick").name("Click to ignite");
 fSim.add(simParams, "seed", 1, 999, 1).name("Random seed").onChange((v: number) => (sim.seed = v));
 fSim.add({ check: () => runCpuCheck() }, "check").name("Check against CPU");
+const smokeParams = { visible: true, rate: smoke.rate, opacity: 0.32 };
+const fSmoke = fSim.addFolder("Smoke");
+fSmoke.add(smokeParams, "visible").name("Show smoke").onChange((v: boolean) => (smoke.object.visible = v));
+fSmoke.add(smokeParams, "rate", 20, 600, 10).name("Particles per second").onChange((v: number) => (smoke.rate = v));
+fSmoke.add(smokeParams, "opacity", 0.05, 0.8, 0.01).name("Opacity").onChange((v: number) => (smoke.material.uniforms.uOpacity.value = v));
 
 let hudTimer = 0;
 let stepAcc = 0;
+let smokeVersion = -1;
 ctx.onFrame((dt) => {
   propMaterial.uniforms.uTime.value += dt;
   terrain.uniforms.uTime.value = propMaterial.uniforms.uTime.value;
@@ -273,12 +292,20 @@ ctx.onFrame((dt) => {
   propMaterial.uniforms.uState.value = sim.texture;
   terrain.uniforms.uState.value = sim.texture;
   props.update(ctx.camera);
+  // 烟源随模拟读回更新（约每 0.5 秒）
+  if (simActive && sim.sampleVersion !== smokeVersion) {
+    smokeVersion = sim.sampleVersion;
+    smoke.setSources(sim.burningSample);
+  }
+  smoke.update(dt, propMaterial.uniforms.uTime.value);
   hudTimer += dt;
   if (hudTimer > 0.5) {
     hudTimer = 0;
     const st = props.stats();
-    if (simActive && (simParams.running || !simLine.startsWith("Fire (sync)"))) {
-      const fs = sim.stats();
+    // 每 0.5 秒异步读回一次：既更新统计，也刷新烟源
+    const fsAsync = simActive ? sim.stats() : null;
+    if (fsAsync && (simParams.running || !simLine.startsWith("Fire (sync)"))) {
+      const fs = fsAsync;
       const h = Math.floor(fs.minutes / 60);
       const m = Math.round(fs.minutes % 60);
       simLine = `Fire: ${h}h ${String(m).padStart(2, "0")}m  burning ${fs.burningCells} cells, affected ${fs.burnedAreaHa.toFixed(0)} ha, building cells hit ${fs.buildingCellsBurned}`;
@@ -311,7 +338,7 @@ const q = new URLSearchParams(location.search);
 const windQ = q.get("wind")?.split(",").map(Number);
 if (windQ?.length === 2 && windQ.every(Number.isFinite)) {
   [simParams.windSpeed, simParams.windFrom] = windQ;
-  sim.setWind(windField());
+  applyWind();
 }
 const igniteQ = q.get("ignite")?.split(",").map(Number);
 if (igniteQ?.length === 2 && igniteQ.every(Number.isFinite)) {
@@ -319,11 +346,14 @@ if (igniteQ?.length === 2 && igniteQ.every(Number.isFinite)) {
   sim.igniteDisc(igniteQ[0], igniteQ[1], 1.5);
   sim.advance(Number(q.get("steps")) || 0);
   // 同步统计一次，不依赖异步读回（便于无头截图验证）
-  const fs = summarize(sim.readState(), grid, sim.minutes);
+  const fs = sim.statsSync();
+  smoke.setSources(sim.burningSample);
+  smokeVersion = sim.sampleVersion;
+  smoke.warmup(smoke.material.uniforms.uLife.value, 0);
   simLine = `Fire (sync): ${Math.floor(fs.minutes / 60)}h ${String(fs.minutes % 60).padStart(2, "0")}m  burning ${fs.burningCells} cells, affected ${fs.burnedAreaHa.toFixed(0)} ha, building cells hit ${fs.buildingCellsBurned}`;
 }
 if (q.has("cpucheck")) runCpuCheck(Number(q.get("cpucheck")) || 80);
 fSim.controllersRecursive().forEach((c) => c.updateDisplay());
 
 // 调试用
-Object.assign(window, { bundle, ctx, terrain, props, layout, sim, runCpuCheck });
+Object.assign(window, { bundle, ctx, terrain, props, layout, sim, smoke, runCpuCheck });
