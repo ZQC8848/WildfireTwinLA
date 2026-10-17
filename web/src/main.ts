@@ -16,6 +16,8 @@ import { Legend } from "./ui/legend";
 import { FireSim } from "./sim/fireSim";
 import { windGrid } from "./sim/wind";
 import { Smoke } from "./scene/smoke";
+import { WindLayer } from "./scene/windLayer";
+import { TerrainWindModel, WindLibrary, buildWindField, type WindMode } from "./sim/terrainWind";
 import { CpuFireSim } from "./sim/cpuReference";
 import type { WindField } from "@core";
 
@@ -123,6 +125,7 @@ fTerrain
   .onChange((v: number) => {
     terrain.verticalScale = v;
     propMaterial.uniforms.uVScale.value = v;
+    windLayer.material.uniforms.uVScale.value = v;
     smoke.material.uniforms.uVScale.value = v;
     props.invalidate();
     wires.rebuild(terrain.minElev, v);
@@ -165,15 +168,37 @@ fBurn
 fBurn.add(sceneParams, "burnSpeed", 10, 300, 10).name("Spread (m/s)");
 
 // ---- GPU 火势模拟 ----
-const simParams = { running: false, stepsPerSecond: 20, windSpeed: 8, windFrom: 45, spotting: true, igniteOnClick: true, seed: 1 };
-const windField = (): WindField => ({ speedMs: simParams.windSpeed, dirFromDeg: simParams.windFrom });
+const simParams = {
+  running: false,
+  stepsPerSecond: 20,
+  windSpeed: 8,
+  windFrom: 45,
+  windMode: "terrain" as WindMode,
+  showWind: true,
+  spotting: true,
+  igniteOnClick: true,
+  seed: 1,
+};
+// 地形修正风场：有 WindNinja 风场库（data/wind/）就用库，否则用地形启发式
+const windModel = new TerrainWindModel(grid);
+const windLibrary = await WindLibrary.load();
+const windSource = () =>
+  simParams.windMode === "uniform" ? "uniform" : windLibrary ? `WindNinja library (${windLibrary.index.source ?? "precomputed"})` : "terrain heuristic (approximate)";
+let currentWind: WindField = buildWindField(simParams.windMode, { speedMs: simParams.windSpeed, dirFromDeg: simParams.windFrom }, windModel, windLibrary);
+const windField = (): WindField => currentWind;
 const sim = new FireSim(ctx.renderer, grid, terrain.gridTexture, windField());
 const smoke = new Smoke(grid, windGrid(windField(), meta.width, meta.height), terrain.minElev, terrain.verticalScale);
 ctx.scene.add(smoke.object);
+const windLayer = new WindLayer(grid, terrain.minElev, terrain.verticalScale);
+ctx.scene.add(windLayer.object);
 const applyWind = () => {
-  sim.setWind(windField());
-  smoke.setWind(windGrid(windField(), meta.width, meta.height));
+  currentWind = buildWindField(simParams.windMode, { speedMs: simParams.windSpeed, dirFromDeg: simParams.windFrom }, windModel, windLibrary);
+  sim.setWind(currentWind);
+  smoke.setWind(windGrid(currentWind, meta.width, meta.height));
+  windLayer.update(currentWind, simParams.windSpeed);
+  windLayer.object.visible = simParams.showWind;
 };
+applyWind();
 let simActive = false;
 let simLine = "Fire: click the terrain to ignite";
 let checkLine = "";
@@ -265,6 +290,11 @@ fSim.add({ reset: resetSim }, "reset").name("Reset");
 fSim.add(simParams, "stepsPerSecond", 1, 60, 1).name("Steps per second");
 fSim.add(simParams, "windSpeed", 0, 30, 0.5).name("Wind speed (m/s)").onChange(applyWind);
 fSim.add(simParams, "windFrom", 0, 359, 1).name("Wind from (°)").onChange(applyWind);
+fSim
+  .add(simParams, "windMode", { "Uniform (single wind)": "uniform", "Terrain-adjusted": "terrain" })
+  .name("Wind model")
+  .onChange(applyWind);
+fSim.add(simParams, "showWind").name("Show wind field").onChange((v: boolean) => (windLayer.object.visible = v));
 fSim.add(simParams, "spotting").name("Spotting (embers)").onChange((v: boolean) => (sim.spotting = v));
 fSim.add(simParams, "igniteOnClick").name("Click to ignite");
 fSim.add(simParams, "seed", 1, 999, 1).name("Random seed").onChange((v: number) => (sim.seed = v));
@@ -311,7 +341,7 @@ ctx.onFrame((dt) => {
       simLine = `Fire: ${h}h ${String(m).padStart(2, "0")}m  burning ${fs.burningCells} cells, affected ${fs.burnedAreaHa.toFixed(0)} ha, building cells hit ${fs.buildingCellsBurned}`;
     }
     document.getElementById("hud")!.textContent =
-      `${hudBase}\nVisible: ${st.instances} instances, ${(st.triangles / 1e6).toFixed(2)} M triangles, ${st.drawCalls} draw calls\n${simLine}${checkLine ? "\n" + checkLine : ""}`;
+      `${hudBase}\nWind: ${simParams.windSpeed} m/s from ${simParams.windFrom}°, ${windSource()}\nVisible: ${st.instances} instances, ${(st.triangles / 1e6).toFixed(2)} M triangles, ${st.drawCalls} draw calls\n${simLine}${checkLine ? "\n" + checkLine : ""}`;
   }
 });
 
@@ -335,6 +365,11 @@ if (new URLSearchParams(location.search).has("burn")) {
 
 // 调试：?wind=速度,来向  ?ignite=x,y  ?steps=N（加载后立即点火并推进 N 步）  ?cpucheck（运行 CPU 对照）
 const q = new URLSearchParams(location.search);
+const modeQ = q.get("windmode");
+if (modeQ === "uniform" || modeQ === "terrain") {
+  simParams.windMode = modeQ;
+  applyWind();
+}
 const windQ = q.get("wind")?.split(",").map(Number);
 if (windQ?.length === 2 && windQ.every(Number.isFinite)) {
   [simParams.windSpeed, simParams.windFrom] = windQ;
