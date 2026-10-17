@@ -13,6 +13,9 @@ import { createPropMaterial } from "./scene/props/propMaterial";
 import { PropField } from "./scene/props/propField";
 import { Wires } from "./scene/props/wires";
 import { Legend } from "./ui/legend";
+import { FireSim, summarize } from "./sim/fireSim";
+import { CpuFireSim } from "./sim/cpuReference";
+import type { WindField } from "@core";
 
 const bundle = await loadGrid();
 const { grid } = bundle;
@@ -155,18 +158,133 @@ fBurn
   });
 fBurn.add(sceneParams, "burnSpeed", 10, 300, 10).name("Spread (m/s)");
 
+// ---- GPU 火势模拟 ----
+const simParams = { running: false, stepsPerSecond: 20, windSpeed: 8, windFrom: 45, spotting: true, igniteOnClick: true, seed: 1 };
+const windField = (): WindField => ({ speedMs: simParams.windSpeed, dirFromDeg: simParams.windFrom });
+const sim = new FireSim(ctx.renderer, grid, terrain.gridTexture, windField());
+let simActive = false;
+let simLine = "Fire: click the terrain to ignite";
+let checkLine = "";
+const activateSim = () => {
+  if (simActive) return;
+  simActive = true;
+  sceneParams.burnPreview = false;
+  propMaterial.uniforms.uBurnOn.value = false;
+  terrain.uniforms.uBurnOn.value = false;
+  propMaterial.uniforms.uUseState.value = true;
+  terrain.uniforms.uUseState.value = true;
+};
+const resetSim = () => {
+  sim.reset();
+  simParams.running = false;
+};
+
+// 点击（不是拖拽）地形点火
+let downAt: [number, number] | null = null;
+ctx.renderer.domElement.addEventListener("pointerdown", (e) => (downAt = [e.clientX, e.clientY]));
+ctx.renderer.domElement.addEventListener("pointerup", (e) => {
+  if (!downAt || !simParams.igniteOnClick) return;
+  const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
+  downAt = null;
+  if (moved > 4) return;
+  const hit = picker.pick(e.clientX, e.clientY);
+  if (!hit) return;
+  activateSim();
+  sim.igniteDisc(hit.x, hit.y, 1.5);
+  simParams.running = true;
+  fSim.controllersRecursive().forEach((c) => c.updateDisplay());
+});
+
+/** 固定点火点与种子，GPU 与 CPU 各跑 steps 步，比较燃烧面积与火场重合度（IoU） */
+function runCpuCheck(steps = 80) {
+  activateSim();
+  resetSim();
+  sim.seed = simParams.seed;
+  sim.spotting = simParams.spotting;
+  // 点火点：山地中燃料最高的格子
+  let best = 0;
+  let cell = 0;
+  for (let y = Math.floor(meta.height * 0.2); y < meta.height * 0.5; y++)
+    for (let x = Math.floor(meta.width * 0.3); x < meta.width * 0.7; x++) {
+      const c = y * meta.width + x;
+      if (grid.data[c * 4 + 3] === CellClass.Vegetation && grid.data[c * 4 + 1] > best) {
+        best = grid.data[c * 4 + 1];
+        cell = c;
+      }
+    }
+  const cx = cell % meta.width;
+  const cy = Math.floor(cell / meta.width);
+  const seedCells: number[] = [];
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) seedCells.push((cy + dy) * meta.width + cx + dx);
+
+  const t0 = performance.now();
+  sim.ignite(seedCells);
+  sim.advance(steps);
+  const gpu = sim.readState(); // 同步读回会等待 GPU 完成，计时包含全部步骤
+  const tGpu = performance.now() - t0;
+
+  const t1 = performance.now();
+  const cpu = new CpuFireSim(grid, windField(), { seed: simParams.seed, spotting: simParams.spotting });
+  cpu.ignite(seedCells);
+  cpu.advance(steps);
+  const tCpu = performance.now() - t1;
+
+  let a = 0;
+  let b = 0;
+  let both = 0;
+  for (let c = 0; c < meta.width * meta.height; c++) {
+    const g = gpu[c * 4] > 0.5;
+    const k = cpu.state[c * 4] > 0.5;
+    if (g) a++;
+    if (k) b++;
+    if (g && k) both++;
+  }
+  const iou = both / Math.max(1, a + b - both);
+  checkLine = `CPU check (${steps} steps): GPU ${a} cells in ${tGpu.toFixed(0)} ms, CPU ${b} cells in ${tCpu.toFixed(0)} ms, IoU ${(iou * 100).toFixed(1)}%`;
+  console.info(`[sim] ${checkLine}`);
+  return { gpuCells: a, cpuCells: b, iou, tGpu, tCpu };
+}
+
+const fSim = gui.addFolder("Fire simulation");
+fSim.add(simParams, "running").name("Run");
+fSim.add({ step: () => (activateSim(), sim.advance(1)) }, "step").name("Step once");
+fSim.add({ reset: resetSim }, "reset").name("Reset");
+fSim.add(simParams, "stepsPerSecond", 1, 60, 1).name("Steps per second");
+fSim.add(simParams, "windSpeed", 0, 30, 0.5).name("Wind speed (m/s)").onChange(() => sim.setWind(windField()));
+fSim.add(simParams, "windFrom", 0, 359, 1).name("Wind from (°)").onChange(() => sim.setWind(windField()));
+fSim.add(simParams, "spotting").name("Spotting (embers)").onChange((v: boolean) => (sim.spotting = v));
+fSim.add(simParams, "igniteOnClick").name("Click to ignite");
+fSim.add(simParams, "seed", 1, 999, 1).name("Random seed").onChange((v: number) => (sim.seed = v));
+fSim.add({ check: () => runCpuCheck() }, "check").name("Check against CPU");
+
 let hudTimer = 0;
+let stepAcc = 0;
 ctx.onFrame((dt) => {
   propMaterial.uniforms.uTime.value += dt;
   terrain.uniforms.uTime.value = propMaterial.uniforms.uTime.value;
   if (sceneParams.burnPreview) (propMaterial.uniforms.uBurn.value as THREE.Vector4).z += sceneParams.burnSpeed * dt;
+  if (simActive && simParams.running) {
+    stepAcc += dt * simParams.stepsPerSecond;
+    const n = Math.min(8, Math.floor(stepAcc));
+    stepAcc -= n;
+    if (n > 0) sim.advance(n);
+  }
+  // 每步之后状态纹理会换成另一张，所以每帧都重新指向当前那张
+  propMaterial.uniforms.uState.value = sim.texture;
+  terrain.uniforms.uState.value = sim.texture;
   props.update(ctx.camera);
   hudTimer += dt;
   if (hudTimer > 0.5) {
     hudTimer = 0;
     const st = props.stats();
+    if (simActive && (simParams.running || !simLine.startsWith("Fire (sync)"))) {
+      const fs = sim.stats();
+      const h = Math.floor(fs.minutes / 60);
+      const m = Math.round(fs.minutes % 60);
+      simLine = `Fire: ${h}h ${String(m).padStart(2, "0")}m  burning ${fs.burningCells} cells, affected ${fs.burnedAreaHa.toFixed(0)} ha, building cells hit ${fs.buildingCellsBurned}`;
+    }
     document.getElementById("hud")!.textContent =
-      `${hudBase}\nVisible: ${st.instances} instances, ${(st.triangles / 1e6).toFixed(2)} M triangles, ${st.drawCalls} draw calls`;
+      `${hudBase}\nVisible: ${st.instances} instances, ${(st.triangles / 1e6).toFixed(2)} M triangles, ${st.drawCalls} draw calls\n${simLine}${checkLine ? "\n" + checkLine : ""}`;
   }
 });
 
@@ -188,5 +306,24 @@ if (new URLSearchParams(location.search).has("burn")) {
   sceneParams.burnSpeed = 0;
 }
 
+// 调试：?wind=速度,来向  ?ignite=x,y  ?steps=N（加载后立即点火并推进 N 步）  ?cpucheck（运行 CPU 对照）
+const q = new URLSearchParams(location.search);
+const windQ = q.get("wind")?.split(",").map(Number);
+if (windQ?.length === 2 && windQ.every(Number.isFinite)) {
+  [simParams.windSpeed, simParams.windFrom] = windQ;
+  sim.setWind(windField());
+}
+const igniteQ = q.get("ignite")?.split(",").map(Number);
+if (igniteQ?.length === 2 && igniteQ.every(Number.isFinite)) {
+  activateSim();
+  sim.igniteDisc(igniteQ[0], igniteQ[1], 1.5);
+  sim.advance(Number(q.get("steps")) || 0);
+  // 同步统计一次，不依赖异步读回（便于无头截图验证）
+  const fs = summarize(sim.readState(), grid, sim.minutes);
+  simLine = `Fire (sync): ${Math.floor(fs.minutes / 60)}h ${String(fs.minutes % 60).padStart(2, "0")}m  burning ${fs.burningCells} cells, affected ${fs.burnedAreaHa.toFixed(0)} ha, building cells hit ${fs.buildingCellsBurned}`;
+}
+if (q.has("cpucheck")) runCpuCheck(Number(q.get("cpucheck")) || 80);
+fSim.controllersRecursive().forEach((c) => c.updateDisplay());
+
 // 调试用
-Object.assign(window, { bundle, ctx, terrain, props, layout });
+Object.assign(window, { bundle, ctx, terrain, props, layout, sim, runCpuCheck });

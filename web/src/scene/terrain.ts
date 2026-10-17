@@ -60,6 +60,8 @@ uniform bool uHasSatellite;
 uniform vec3 uClassColors[3];
 // 0 稀疏干草，1 茂密灌丛，2 干燥色调，3 建筑
 uniform vec3 uNatural[4];
+uniform sampler2D uState; // 火势模拟状态：R = 0 未燃 / 1 燃烧中 / 2 已燃尽
+uniform bool uUseState;
 uniform bool uBurnOn;
 uniform vec4 uBurn; // 圆心 x, 圆心 z, 火线半径, 火线宽度（与模型 shader 共用同一个对象）
 uniform float uTime;
@@ -161,9 +163,26 @@ void main() {
   float sky = 0.5 + 0.5 * n.y;
   col *= 0.32 + 0.18 * sky + 0.72 * diffuse;
 
-  // 燃烧预览：燃尽为灰黑，火线处发光
+  // 火势状态：燃尽为灰黑，燃烧处发光。双线性混合四个格子，火场边缘不出现方格锯齿
   float burnGlow = 0.0;
-  if (uBurnOn && w.x < 0.5) {
+  if (uUseState) {
+    vec2 f = fract(vCell);
+    ivec2 c0 = ivec2(floor(vCell));
+    float burned = 0.0;
+    float burning = 0.0;
+    for (int j = 0; j < 2; j++) {
+      for (int i = 0; i < 2; i++) {
+        ivec2 cc = clamp(c0 + ivec2(i, j), ivec2(0), ivec2(uGridSize) - 1);
+        float st = texelFetch(uState, cc, 0).r;
+        float wgt = (i == 1 ? f.x : 1.0 - f.x) * (j == 1 ? f.y : 1.0 - f.y);
+        burned += wgt * step(1.5, st);
+        burning += wgt * step(0.5, st) * (1.0 - step(1.5, st));
+      }
+    }
+    col = mix(col, vec3(0.06, 0.055, 0.05), (burned + burning) * 0.85);
+    float flick = 0.35 + 0.65 * vnoise(vWorldXZ * 0.03 + vec2(uTime * 0.9, -uTime * 0.6)) * (0.6 + 0.4 * vnoise(vWorldXZ * 0.11 - uTime * 2.3));
+    burnGlow = burning * flick;
+  } else if (uBurnOn && w.x < 0.5) {
     float d = length(vWorldXZ - uBurn.xy);
     if (d < uBurn.z - uBurn.w) {
       col = mix(col, vec3(0.06, 0.055, 0.05), 0.85);
@@ -246,6 +265,8 @@ export class Terrain {
           uSunDir: { value: new THREE.Vector3(-0.6, 0.8, 0.4).normalize() },
           uHover: { value: new THREE.Vector2(-10, -10) },
           uSatellite: { value: null },
+          uState: { value: null },
+          uUseState: { value: false },
           uBurnOn: { value: false },
           uBurn: { value: new THREE.Vector4() },
           uTime: { value: 0 },
