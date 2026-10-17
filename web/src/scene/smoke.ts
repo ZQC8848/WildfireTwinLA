@@ -110,6 +110,13 @@ void main() {
 }
 `;
 
+const BASE_DRIFT = 9;
+const BASE_LIFE = 16;
+/** 烟的平均漂移速度是火头推进速度的多少倍 */
+const LEAD = 1.8;
+/** 烟羽最大长度（米） */
+const MAX_PLUME = 4000;
+
 export class Smoke {
   readonly object: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial>;
   readonly material: THREE.ShaderMaterial;
@@ -157,11 +164,11 @@ export class Smoke {
         THREE.UniformsLib.fog,
         {
           uTime: { value: 0 },
-          uLife: { value: 16 },
+          uLife: { value: BASE_LIFE },
           uVScale: { value: vScale },
           uMinElev: { value: minElev },
           uRise: { value: 1100 },
-          uDrift: { value: 9 },
+          uDrift: { value: BASE_DRIFT },
           uOpacity: { value: 0.32 },
           uNight: { value: 0 },
         },
@@ -225,11 +232,32 @@ export class Smoke {
     this.material.uniforms.uTime.value = now;
   }
 
+  // 漂移节奏：模拟是时间压缩的（每秒几十步），火线在屏幕上推进很快。
+  // 粒子在整个生命期内的平均漂移速度 = 风速 × uDrift（漂移公式的时间平均系数为 1），
+  // 所以把 uDrift 设为"火头推进速度 × LEAD / 风速"，顺风时烟就会跑到火头前面。
+  private driftTarget = BASE_DRIFT;
+  private lifeTarget = BASE_LIFE;
+
+  /** frontSpeed：火头沿风向的推进速度（米 / 真实秒）；windSpeed：来流风速（m/s） */
+  setPace(frontSpeed: number, windSpeed: number) {
+    const v = Math.max(windSpeed, 1);
+    this.driftTarget = Math.min(400, Math.max(BASE_DRIFT, (frontSpeed * LEAD) / v));
+    // 烟羽长度（风速 × 漂移系数 × 寿命）控制在 MAX_PLUME 以内
+    this.lifeTarget = Math.min(BASE_LIFE, Math.max(6, MAX_PLUME / (v * this.driftTarget)));
+  }
+
   update(dt: number, time: number) {
+    // 平滑过渡，避免空中已有的烟突然跳动
+    const u = this.material.uniforms;
+    const a = 1 - Math.exp(-dt / 1.5);
+    u.uDrift.value += (this.driftTarget - u.uDrift.value) * a;
+    u.uLife.value += (this.lifeTarget - u.uLife.value) * a;
     this.material.uniforms.uTime.value = time;
     if (!this.sources.length) return;
     // 火越大烟越多，但有上限
-    const perSecond = Math.min(this.rate, 30 + this.sources.length * 0.25);
+    // 寿命缩短时按比例多生成，空中的粒子总数保持不变，烟羽拉长后不会变稀
+    const lifeScale = BASE_LIFE / this.material.uniforms.uLife.value;
+    const perSecond = Math.min(this.rate, 30 + this.sources.length * 0.25) * lifeScale;
     this.acc += perSecond * dt;
     let n = Math.floor(this.acc);
     this.acc -= n;

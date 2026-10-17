@@ -17,7 +17,7 @@ import { Smoke } from "./scene/smoke";
 import { WindLayer } from "./scene/windLayer";
 import { FireSim } from "./sim/fireSim";
 import { FireMonitor, formatMinutes } from "./sim/fireMonitor";
-import { windGrid } from "./sim/wind";
+import { windGrid, windToGrid } from "./sim/wind";
 import { TerrainWindModel, WindLibrary, buildWindField, type WindMode } from "./sim/terrainWind";
 import { CpuFireSim } from "./sim/cpuReference";
 import { Shell, compassName, type Mode } from "./ui/shell";
@@ -171,6 +171,8 @@ window.dispatchEvent(new Event("resize"));
 
 const resetSim = () => {
   sim.reset();
+  headPrev = null;
+  frontSpeed = 0;
   smoke.clear();
   monitor.reset();
   simParams.running = false;
@@ -264,6 +266,32 @@ ctx.renderer.domElement.addEventListener("pointerup", (e) => {
   shell.setRunning(true);
 });
 
+// ---- 火头推进速度：烟雾的漂移节奏跟着它走 ----
+// 把燃烧格投影到来流的下风方向，取第 98 百分位（排除零星飞火）作为火头位置，
+// 用两次读回之间的真实时间求推进速度（米 / 秒），指数平滑。暂停或火在后退时衰减到 0。
+let headPrev: number | null = null;
+let headTime = 0;
+let frontSpeed = 0;
+function updateFrontPace(now = performance.now() / 1000, running = simParams.running) {
+  const [ux, uy] = windToGrid(inflow());
+  const len = Math.hypot(ux, uy);
+  const cells = sim.burningSample;
+  if (!cells.length || len < 1e-3) {
+    headPrev = null;
+    frontSpeed *= 0.5;
+  } else {
+    const proj = cells.map((c) => ((c % meta.width) * ux + Math.floor(c / meta.width) * uy) / len).sort((a, b) => a - b);
+    const head = proj[Math.floor((proj.length - 1) * 0.98)] * meta.cellSize;
+    if (headPrev !== null && now > headTime) {
+      const v = Math.max(0, (head - headPrev) / (now - headTime));
+      frontSpeed = running ? 0.7 * frontSpeed + 0.3 * v : frontSpeed * 0.5;
+    }
+    headPrev = head;
+  }
+  headTime = now;
+  smoke.setPace(frontSpeed, simParams.windSpeed);
+}
+
 // ---- 每帧 ----
 let checkLine = ""; // CPU 对照结果（调试 HUD）
 let uiTimer = 0;
@@ -301,6 +329,7 @@ ctx.onFrame((dt) => {
   if (simActive && sim.sampleVersion !== sampleSeen && sim.lastState) {
     sampleSeen = sim.sampleVersion;
     smoke.setSources(sim.burningSample, sim.burningWeight);
+    updateFrontPace();
     monitor.update(sim.lastState, sim.burningSample, sim.lastStatsMinutes);
   }
   uiTimer += dt;
@@ -465,6 +494,7 @@ if (igniteQ?.length === 2 && igniteQ.every(Number.isFinite)) {
     done += n;
     sim.statsSync();
     monitor.update(sim.lastState!, sim.burningSample, sim.minutes);
+    updateFrontPace(done / simParams.stepsPerSecond, true);
   }
   sim.statsSync();
   sampleSeen = sim.sampleVersion;
