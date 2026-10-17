@@ -22,6 +22,7 @@ wildfire-fuel = "wildfire_grid.fuels:main"
 wildfire-norte-perimeter = "wildfire_grid.perimeter:main"
 wildfire-norte-damage = "wildfire_grid.damage:main"
 wildfire-basemap = "wildfire_grid.basemap:main"
+wildfire-roads = "wildfire_grid.roads:main"
 
 [build-system]
 requires = ["setuptools>=69"]

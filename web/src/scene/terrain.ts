@@ -68,7 +68,9 @@ uniform sampler2D uFuelGroup; // 可选：LANDFIRE 燃料类别（R × 255 = Fue
 uniform bool uHasFuelGroup;
 uniform vec3 uFuelColors[4];  // 草地、草灌、灌丛、林地
 uniform int uDevPalette;      // 建成区配色：0 暖灰混凝土，1 灌溉绿地，2 深色退后，3 混合（建成区用卫星影像）
-uniform bool uSatDetail;      // 混合方案：卫星影像只用于建成区，并给野外的燃料配色加上影像的明暗纹理
+uniform bool uSatDetail;
+uniform sampler2D uRoads;     // 可选：OSM 路网贴图（R 描边，G 路面，B 主干道与高速），见 scene/roads.ts
+uniform bool uHasRoads;      // 混合方案：卫星影像只用于建成区，并给野外的燃料配色加上影像的明暗纹理
 uniform float uNight; // 0 白天（Plan）到 1 夜间（Respond）
 uniform sampler2D uWater; // R 河岸有向距离（米），G 路缘有向距离（米），BA 水流方向
 uniform vec3 uSkyColor;   // 水面反射的天空颜色，随模式变化
@@ -252,6 +254,14 @@ void main() {
       // 有燃料类别时，不可燃区域几乎都是城区（道路无法单独识别），统一画成暖灰色的建成区地面
       if (uHasFuelGroup) paved = devPaved;
       col = mix(col, paved, road);
+      // 路网：细的深色路缘、略透明的暖灰路面，主干道与高速偏暖黄；随后与地面一起受光照。
+      // 颜色压得比底图亮不了太多：路网是参照，不能抢燃料配色与火的视觉重心
+      if (uHasRoads) {
+        vec3 rd = texture(uRoads, vec2((vCell.x + 0.5) / uGridSize.x, 1.0 - (vCell.y + 0.5) / uGridSize.y)).rgb;
+        col = mix(col, vec3(0.16, 0.15, 0.14), rd.r * 0.4);
+        col = mix(col, vec3(0.7, 0.68, 0.63), rd.g * 0.8);
+        col = mix(col, vec3(0.86, 0.79, 0.6), rd.b * 0.9);
+      }
     }
   } else if (uLayer == 1) {
     col = ramp((vElev - uElevRange.x) / (uElevRange.y - uElevRange.x));
@@ -565,6 +575,8 @@ export class Terrain {
           uHasFuelGroup: { value: false },
           uDevPalette: { value: 0 },
           uSatDetail: { value: false },
+          uRoads: { value: null },
+          uHasRoads: { value: false },
           uFuelColors: {
             value: [FuelGroup.Grass, FuelGroup.GrassShrub, FuelGroup.Shrub, FuelGroup.Timber].map((g) => new THREE.Color(FUEL_GROUP_COLORS[g])),
           },
@@ -678,6 +690,12 @@ export class Terrain {
     this.uniforms.uForecast.value = texture;
     this.uniforms.uForecastSize.value.set(size, size);
     this.uniforms.uForecastScale.value = scale;
+  }
+
+  /** 路网贴图（scene/roads.ts 光栅化），只在 Natural 图层显示 */
+  setRoads(tex: THREE.Texture) {
+    this.uniforms.uRoads.value = tex;
+    this.uniforms.uHasRoads.value = true;
   }
 
   /** 混合方案：卫星影像只用于建成区，并作为野外燃料配色的明暗纹理 */

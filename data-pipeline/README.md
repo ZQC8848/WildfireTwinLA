@@ -74,6 +74,13 @@ as texture for the fuel colors. Attribution: "Contains modified Copernicus Senti
 wildfire-basemap --grid-dir ../web/public/data --before 2026-10-16T18:30:00Z
 ```
 
+Export the OpenStreetMap road network in grid coordinates (`roads.json`, display only; the
+frontend drapes it on the terrain as a 4096² texture):
+
+```bash
+wildfire-roads --grid-dir ../web/public/data
+```
+
 Build the best available Norte perimeter (NIFC WFIGS, else a Sentinel-2 dNBR burn scar when
 `--pre-nir/--pre-swir/--post-nir/--post-swir` are given, else the coarse VIIRS-detected area),
 and flag buildings along the streets where OCFA reported damage:

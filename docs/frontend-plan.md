@@ -231,6 +231,9 @@ web/
 >   - 图例注明 LANDFIRE 和 Copernicus 的来源。
 >
 >   用 `?palette=concrete|sage|recede|hybrid|satellite` 可以切换对比。暖灰、灌溉绿地、深色退后和纯卫星这几种方案都比较过，最后选了混合。
+> - 路网已完成：`wildfire-roads` 导出 OSM 道路（高速、主干道、次干道、街道、土路，共约 8,000 条），前端光栅化成 4096² 贴图铺在地形上。
+>   - 深色细路缘、暖灰路面，主干道偏暖黄，土路画成虚线；
+>   - 只用于显示，模拟不读取。
 > - 待做：Google 3D Tiles（可选）。
 > - 调试 URL：`?view=overview|fire|community`。
 

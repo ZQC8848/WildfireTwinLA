@@ -30,6 +30,7 @@ import { cellXY } from "@core";
 import { NORTE_SCENARIO, norteIgnitionCells } from "./data/norte";
 import { FUEL_GROUP_COLORS, FuelGroup, fuelGroups, fuelModelName } from "./data/fuelModel";
 import { LAYERS } from "./scene/layers";
+import { loadRoads, rasterizeRoads } from "./scene/roads";
 import { ENSEMBLE_FACTOR, ENSEMBLE_MEMBERS, Ensemble, communityOutlook, type CommunityOutlook, type EnsembleResult } from "./sim/ensemble";
 
 const q = new URLSearchParams(location.search);
@@ -44,6 +45,14 @@ const ctx = createScene(document.getElementById("app")!);
 // LANDFIRE 燃料类别（有 fuel-model.bin 时）：地表按类别着色，水面用其中的水体
 const groups = bundle.fuelModel ? fuelGroups(bundle.fuelModel) : undefined;
 const terrain = new Terrain(grid, 1.5, bundle.source === "mock", groups);
+// OSM 路网（可选 roads.json）：异步加载后光栅化成贴图，不阻塞首屏
+loadRoads().then((roads) => {
+  if (!roads) return;
+  const size = Math.min(4096, ctx.renderer.capabilities.maxTextureSize);
+  const tex = rasterizeRoads(roads, meta.width, meta.cellSize, size);
+  tex.anisotropy = ctx.renderer.capabilities.getMaxAnisotropy();
+  terrain.setRoads(tex);
+});
 // 报告受损区域（buildings.json 的 reportedDamageArea，街道级别，不是逐户确认）：Respond 模式下画成虚线轮廓
 const damageCells = bundle.buildings.filter((b) => (b as { reportedDamageArea?: boolean }).reportedDamageArea).map((b) => b.cell);
 terrain.setDamageArea(damageCells);
@@ -53,10 +62,13 @@ if (groups) {
     { label: "Grass and sage scrub", color: FUEL_GROUP_COLORS[FuelGroup.GrassShrub]! },
     { label: "Chaparral and woodland", color: FUEL_GROUP_COLORS[FuelGroup.Shrub]! },
     { label: "Developed land (satellite image)", color: "#8a8478" },
+    { label: "Highways and major roads", color: "#d9c99a" },
+    { label: "Streets and dirt roads", color: "#b3ada1" },
     { label: "Water", color: "#3f5f6a" },
   ];
   // Copernicus 数据使用条款要求注明出处
-  LAYERS.natural.note = "Fuels: LANDFIRE FBFM40, fall 2026. Image: modified Copernicus Sentinel-2 data, Oct 14, 2026.";
+  LAYERS.natural.note =
+    "Fuels: LANDFIRE FBFM40, fall 2026. Image: modified Copernicus Sentinel-2 data, Oct 14, 2026. Roads: © OpenStreetMap contributors.";
 }
 ctx.scene.add(terrain.mesh);
 
