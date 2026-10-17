@@ -26,7 +26,8 @@ export const LAYERS: Record<LayerId, LayerDef> = {
       { label: "Dense chaparral", color: "#3d5a2c" },
       { label: "Sparse / dry grass", color: "#a89a63" },
       { label: "Neighborhoods", color: "#9c9a84" },
-      { label: "Roads / water", color: "#59626b" },
+      { label: "Streams", color: "#3f5f6a" },
+      { label: "Roads", color: "#59626b" },
     ],
   },
   elevation: {

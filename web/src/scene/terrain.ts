@@ -3,6 +3,7 @@
 import * as THREE from "three";
 import { GRID_CHANNELS, type Grid } from "@core";
 import { CLASS_COLORS, LAYERS, type LayerId } from "./layers";
+import { buildWaterTexture } from "./waterField";
 
 const vertexShader = /* glsl */ `
 uniform sampler2D uGrid;
@@ -15,6 +16,7 @@ out vec3 vNormalW;
 out vec2 vCell;
 out float vElev;
 out vec2 vWorldXZ;
+out float vWorldY;
 
 #include <fog_pars_vertex>
 
@@ -35,6 +37,7 @@ void main() {
   vec3 pos = position;
   pos.y = (e - uMinElev) * uVScale;
   vWorldXZ = pos.xz;
+  vWorldY = pos.y;
   vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
   gl_Position = projectionMatrix * mvPosition;
   #include <fog_vertex>
@@ -61,6 +64,9 @@ uniform vec3 uClassColors[3];
 // 0 稀疏干草，1 茂密灌丛，2 干燥色调，3 建筑
 uniform vec3 uNatural[4];
 uniform float uNight; // 0 白天（Plan）到 1 夜间（Respond）
+uniform sampler2D uWater; // R 河岸有向距离（米），G 路缘有向距离（米），BA 水流方向
+uniform vec3 uSkyColor;   // 水面反射的天空颜色，随模式变化
+uniform float uWaterTime;
 uniform sampler2D uState; // 火势模拟状态：R = 0 未燃 / 1 燃烧中 / 2 已燃尽
 uniform bool uUseState;
 uniform bool uBurnOn;
@@ -71,6 +77,7 @@ in vec3 vNormalW;
 in vec2 vCell;
 in float vElev;
 in vec2 vWorldXZ;
+in float vWorldY;
 
 #include <fog_pars_fragment>
 
@@ -108,6 +115,20 @@ vec3 ramp(float t) {
   return mix(uRamp[2], uRamp[3], t - 2.0);
 }
 
+vec4 waterAt(vec2 p) {
+  vec2 f = fract(p);
+  ivec2 c = ivec2(floor(p));
+  ivec2 hi = ivec2(uGridSize) - 1;
+  vec4 a = mix(texelFetch(uWater, clamp(c, ivec2(0), hi), 0), texelFetch(uWater, clamp(c + ivec2(1, 0), ivec2(0), hi), 0), f.x);
+  vec4 b = mix(texelFetch(uWater, clamp(c + ivec2(0, 1), ivec2(0), hi), 0), texelFetch(uWater, clamp(c + ivec2(1, 1), ivec2(0), hi), 0), f.x);
+  return mix(a, b, f.y);
+}
+
+// 沿水流方向平移的两层噪声，作为水面起伏的高度
+float ripple(vec2 q, vec2 flow) {
+  return vnoise(q - flow * uWaterTime * 0.55) * 0.62 + vnoise(q * 2.3 - flow * uWaterTime * 1.15 + 7.3) * 0.38;
+}
+
 vec3 oneHot(float cls) {
   return vec3(cls < 0.5, cls > 0.5 && cls < 1.5, cls > 1.5);
 }
@@ -127,6 +148,17 @@ vec3 classWeights(vec2 p) {
 void main() {
   vec4 smoothCell = bilinear(vCell);
   vec3 w = classWeights(vCell);
+  // 河流与道路的覆盖度来自有向距离场的 0 等值线，屏幕空间抗锯齿，岸线与路缘是平滑曲线
+  vec4 wf = waterAt(vCell);
+  float aaW = max(fwidth(wf.r) * 0.75, 0.6);
+  float aaR = max(fwidth(wf.g) * 0.75, 0.6);
+  float water = 1.0 - smoothstep(-aaW, aaW, wf.r);
+  float road = 1.0 - smoothstep(-aaR, aaR, wf.g);
+  // 植被与建筑之间仍用原来的双线性权重，只是去掉不可燃部分后重新归一
+  vec2 vb = w.yz;
+  float vbSum = vb.x + vb.y;
+  vb = vbSum > 1e-3 ? vb / vbSum : vec2(1.0, 0.0);
+  w = vec3(max(water, road), (1.0 - max(water, road)) * vb);
   float fuel = smoothCell.g;
   float dryness = smoothCell.b;
 
@@ -138,14 +170,17 @@ void main() {
       // 燃料到覆盖度的曲线：中等燃料就已经是大片深色灌丛，稀疏处才露出干草
       float cover = smoothstep(0.08, 0.6, fuel);
       vec3 veg = mix(mix(uNatural[0], uNatural[1], cover), uNatural[2], dryness * 0.25);
-      col = w.x * uClassColors[0] + w.y * veg + w.z * uNatural[3];
+      col = vb.x * veg + vb.y * uNatural[3];
+      // 河岸外 10 m 内略暗：湿润的河岸
+      col *= 1.0 - 0.22 * smoothstep(10.0, 0.0, wf.r) * (1.0 - water);
+      col = mix(col, uClassColors[0], road);
     }
   } else if (uLayer == 1) {
     col = ramp((vElev - uElevRange.x) / (uElevRange.y - uElevRange.x));
   } else if (uLayer == 2) {
-    col = w.x * uClassColors[0] + (1.0 - w.x) * ramp(fuel);
+    col = mix(ramp(fuel), uClassColors[0], w.x);
   } else if (uLayer == 3) {
-    col = w.x * uClassColors[0] + (1.0 - w.x) * ramp(dryness);
+    col = mix(ramp(dryness), uClassColors[0], w.x);
   } else {
     col = w.x * uClassColors[0] + w.y * uClassColors[1] + w.z * uClassColors[2];
   }
@@ -166,6 +201,37 @@ void main() {
   // Respond 模式：天色暗下来，火光（后面叠加）成为唯一的亮色
   col *= mix(1.0, 0.38, uNight);
 
+  if (water > 0.001) {
+    vec3 wcol;
+    if (uLayer == 0) {
+      // 水面：按离岸距离分浅水与深水；起伏的法线带来菲涅尔反射与太阳高光；岸边一圈水沫
+      vec2 flow = wf.ba;
+      vec2 q = vWorldXZ * 0.045;
+      float e = 0.12;
+      float hx = ripple(q + vec2(e, 0.0), flow) - ripple(q - vec2(e, 0.0), flow);
+      float hz = ripple(q + vec2(0.0, e), flow) - ripple(q - vec2(0.0, e), flow);
+      vec3 wn = normalize(vec3(-hx * 1.4, 1.0, -hz * 1.4));
+      float depth = clamp(-wf.r / 18.0, 0.0, 1.0);
+      // 山谷溪流：浅处偏青绿、深处偏墨绿蓝，不用泳池式的亮蓝
+      wcol = mix(vec3(0.34, 0.49, 0.5), vec3(0.11, 0.23, 0.28), depth);
+      vec3 V = normalize(cameraPosition - vec3(vWorldXZ.x, vWorldY, vWorldXZ.y));
+      vec3 L = normalize(uSunDir);
+      wcol *= 0.62 + 0.38 * max(dot(wn, L), 0.0);
+      float fres = pow(1.0 - max(dot(wn, V), 0.0), 4.0);
+      wcol = mix(wcol, uSkyColor, fres * 0.35);
+      float foam = smoothstep(-6.0, -2.0, wf.r) * (1.0 - smoothstep(-2.0, 0.0, wf.r));
+      foam *= smoothstep(0.45, 0.8, vnoise(vWorldXZ * 0.12 - flow * uWaterTime * 1.6));
+      wcol = mix(wcol, vec3(0.88, 0.92, 0.92), foam * 0.55);
+      wcol *= mix(1.0, 0.32, uNight);
+      float spec = pow(max(dot(wn, normalize(L + V)), 0.0), 140.0);
+      wcol += vec3(1.0, 0.97, 0.9) * spec * 0.7 * (1.0 - uNight);
+    } else {
+      // 数据图层下用平涂的 Marine，与风和水的语义色一致
+      wcol = vec3(0.435, 0.616, 0.749) * 0.75 * (0.32 + 0.18 * sky + 0.72 * diffuse) * mix(1.0, 0.38, uNight);
+    }
+    col = mix(col, wcol, water);
+  }
+
   // 火势状态：燃尽为灰黑，燃烧处发光。双线性混合四个格子，火场边缘不出现方格锯齿
   float burnGlow = 0.0;
   if (uUseState) {
@@ -185,7 +251,7 @@ void main() {
     col = mix(col, vec3(0.06, 0.055, 0.05), (burned + burning) * 0.85);
     float flick = 0.35 + 0.65 * vnoise(vWorldXZ * 0.03 + vec2(uTime * 0.9, -uTime * 0.6)) * (0.6 + 0.4 * vnoise(vWorldXZ * 0.11 - uTime * 2.3));
     burnGlow = burning * flick;
-  } else if (uBurnOn && w.x < 0.5) {
+  } else if (uBurnOn && w.x < 0.5) { // 河流与道路不参与燃烧预览
     float d = length(vWorldXZ - uBurn.xy);
     if (d < uBurn.z - uBurn.w) {
       col = mix(col, vec3(0.06, 0.055, 0.05), 0.85);
@@ -269,6 +335,9 @@ export class Terrain {
           uHover: { value: new THREE.Vector2(-10, -10) },
           uSatellite: { value: null },
           uNight: { value: 0 },
+          uWater: { value: null },
+          uSkyColor: { value: new THREE.Color("#d4d8cf") },
+          uWaterTime: { value: 0 },
           uState: { value: null },
           uUseState: { value: false },
           uBurnOn: { value: false },
@@ -285,6 +354,7 @@ export class Terrain {
     });
     // UniformsUtils.merge 会克隆纹理，所以在合并之后再赋值
     material.uniforms.uGrid.value = this.gridTexture;
+    material.uniforms.uWater.value = buildWaterTexture(grid);
 
     this.mesh = new THREE.Mesh(geo, material);
     // 几何体是平的，位移在 GPU 上完成，包围体不可信

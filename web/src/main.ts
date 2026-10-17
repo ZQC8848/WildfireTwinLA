@@ -191,6 +191,7 @@ const applyNight = (v: number) => {
   smoke.material.uniforms.uNight.value = v;
   sceneBg.copy(PLAN_BG).lerp(RESPOND_BG, v);
   fog.color.copy(sceneBg);
+  (terrain.uniforms.uSkyColor.value as THREE.Color).copy(sceneBg);
 };
 function setMode(mode: Mode) {
   shell.setMode(mode);
@@ -271,6 +272,7 @@ let sampleSeen = -1;
 ctx.onFrame((dt) => {
   propMaterial.uniforms.uTime.value += dt;
   terrain.uniforms.uTime.value = propMaterial.uniforms.uTime.value;
+  terrain.uniforms.uWaterTime.value = propMaterial.uniforms.uTime.value;
   if (night !== nightTarget) {
     night = nightTarget > night ? Math.min(nightTarget, night + dt / 1.2) : Math.max(nightTarget, night - dt / 1.2);
     applyNight(night);
