@@ -7,6 +7,11 @@ import { TerrainPicker } from "./interact/picking";
 import { LAYERS, type LayerId } from "./scene/layers";
 import { createScene } from "./scene/setup";
 import { Terrain } from "./scene/terrain";
+import { loadAssets } from "./scene/props/assets";
+import { layoutProps } from "./scene/props/placement";
+import { createPropMaterial } from "./scene/props/propMaterial";
+import { PropField } from "./scene/props/propField";
+import { Wires } from "./scene/props/wires";
 import { Legend } from "./ui/legend";
 
 const bundle = await loadGrid();
@@ -27,6 +32,23 @@ if (bundle.source === "real") {
   );
 }
 
+// 植被、建筑与电力设施
+const lib = await loadAssets();
+const layout = layoutProps(grid, bundle.buildings, bundle.communities, lib);
+const propMaterial = createPropMaterial(
+  new THREE.Vector2(meta.width, meta.height),
+  terrain.minElev,
+  terrain.verticalScale,
+  terrain.uniforms.uSunDir.value as THREE.Vector3,
+);
+const props = new PropField(layout, lib, meta, propMaterial);
+// 燃烧预览的参数与时间由地形和模型共用
+terrain.uniforms.uBurn.value = propMaterial.uniforms.uBurn.value;
+ctx.scene.add(props.object);
+const wires = new Wires(layout.spans);
+wires.rebuild(terrain.minElev, terrain.verticalScale);
+ctx.scene.add(wires.object);
+
 let buildingCells = 0;
 for (let c = 0; c < meta.width * meta.height; c++) {
   if (grid.data[c * GRID_CHANNELS + 3] === CellClass.Building) buildingCells++;
@@ -35,7 +57,9 @@ document.getElementById("hud")!.textContent = [
   `Data: ${bundle.source === "mock" ? "synthetic grid" : "real grid"}  ${meta.width}×${meta.height} @ ${meta.cellSize} m`,
   `Elevation: ${Math.round(terrain.minElev)}–${Math.round(terrain.maxElev)} m`,
   `Building cells: ${buildingCells}  Buildings: ${bundle.buildings.length}  Communities: ${bundle.communities.length}`,
+  `Placed objects: ${props.count}  Wire spans: ${layout.spans.length}`,
 ].join("\n");
+const hudBase = document.getElementById("hud")!.textContent;
 
 // 图例与悬停信息
 const panels = document.getElementById("panels")!;
@@ -91,7 +115,12 @@ fTerrain.add(params, "layer", layerOptions).name("Layer").onChange(applyLayer);
 fTerrain
   .add(params, "verticalScale", 1, 4, 0.1)
   .name("Vertical exaggeration")
-  .onChange((v: number) => (terrain.verticalScale = v));
+  .onChange((v: number) => {
+    terrain.verticalScale = v;
+    propMaterial.uniforms.uVScale.value = v;
+    props.invalidate();
+    wires.rebuild(terrain.minElev, v);
+  });
 fTerrain.add(params, "contours").name("Contours").onChange((v: boolean) => (terrain.uniforms.uContours.value = v));
 fTerrain
   .add(params, "contourStep", 10, 200, 10)
@@ -99,5 +128,65 @@ fTerrain
   .onChange((v: number) => (terrain.uniforms.uContourStep.value = v));
 fTerrain.add(terrain.mesh.material, "wireframe").name("Wireframe");
 
+const sceneParams = { models: true, wires: true, lodScale: 1, sway: 1, night: 0, burnPreview: false, burnSpeed: 60 };
+const fScene = gui.addFolder("Scene objects");
+fScene.add(sceneParams, "models").name("Trees and buildings").onChange((v: boolean) => (props.object.visible = v));
+fScene.add(sceneParams, "wires").name("Power lines").onChange((v: boolean) => (wires.object.visible = v));
+fScene
+  .add(sceneParams, "lodScale", 0.25, 3, 0.05)
+  .name("Detail distance")
+  .onChange((v: number) => {
+    props.lodScale = v;
+    props.invalidate();
+  });
+fScene.add(sceneParams, "sway", 0, 3, 0.1).name("Wind sway").onChange((v: number) => (propMaterial.uniforms.uSway.value = v));
+fScene.add(sceneParams, "night", 0, 1, 0.01).name("Night").onChange((v: number) => (propMaterial.uniforms.uNight.value = v));
+
+// 燃烧预览：P2 的模拟完成前，用一个从山地向外扩张的圆环验证模型的燃烧与燃尽效果
+const burnCenter = new THREE.Vector2(0, -meta.height * meta.cellSize * 0.18);
+const fBurn = gui.addFolder("Burn preview");
+fBurn
+  .add(sceneParams, "burnPreview")
+  .name("Enabled")
+  .onChange((v: boolean) => {
+    propMaterial.uniforms.uBurnOn.value = v;
+    terrain.uniforms.uBurnOn.value = v;
+    (propMaterial.uniforms.uBurn.value as THREE.Vector4).set(burnCenter.x, burnCenter.y, 0, 150);
+  });
+fBurn.add(sceneParams, "burnSpeed", 10, 300, 10).name("Spread (m/s)");
+
+let hudTimer = 0;
+ctx.onFrame((dt) => {
+  propMaterial.uniforms.uTime.value += dt;
+  terrain.uniforms.uTime.value = propMaterial.uniforms.uTime.value;
+  if (sceneParams.burnPreview) (propMaterial.uniforms.uBurn.value as THREE.Vector4).z += sceneParams.burnSpeed * dt;
+  props.update(ctx.camera);
+  hudTimer += dt;
+  if (hudTimer > 0.5) {
+    hudTimer = 0;
+    const st = props.stats();
+    document.getElementById("hud")!.textContent =
+      `${hudBase}\nVisible: ${st.instances} instances, ${(st.triangles / 1e6).toFixed(2)} M triangles, ${st.drawCalls} draw calls`;
+  }
+});
+
+// 调试：?cam=x,y,z,tx,ty,tz 指定相机位置与目标，便于截图对比
+const camParam = new URLSearchParams(location.search).get("cam");
+if (camParam) {
+  const v = camParam.split(",").map(Number);
+  if (v.length === 6 && v.every(Number.isFinite)) {
+    ctx.camera.position.set(v[0], v[1], v[2]);
+    ctx.controls.target.set(v[3], v[4], v[5]);
+    ctx.controls.update();
+  }
+}
+if (new URLSearchParams(location.search).has("burn")) {
+  sceneParams.burnPreview = true;
+  propMaterial.uniforms.uBurnOn.value = true;
+  terrain.uniforms.uBurnOn.value = true;
+  (propMaterial.uniforms.uBurn.value as THREE.Vector4).set(burnCenter.x, burnCenter.y, Number(new URLSearchParams(location.search).get("burn")) || 1500, 150);
+  sceneParams.burnSpeed = 0;
+}
+
 // 调试用
-Object.assign(window, { bundle, ctx, terrain });
+Object.assign(window, { bundle, ctx, terrain, props, layout });

@@ -14,6 +14,7 @@ uniform float uMinElev;
 out vec3 vNormalW;
 out vec2 vCell;
 out float vElev;
+out vec2 vWorldXZ;
 
 #include <fog_pars_vertex>
 
@@ -33,6 +34,7 @@ void main() {
 
   vec3 pos = position;
   pos.y = (e - uMinElev) * uVScale;
+  vWorldXZ = pos.xz;
   vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
   gl_Position = projectionMatrix * mvPosition;
   #include <fog_vertex>
@@ -58,10 +60,14 @@ uniform bool uHasSatellite;
 uniform vec3 uClassColors[3];
 // 0 稀疏干草，1 茂密灌丛，2 干燥色调，3 建筑
 uniform vec3 uNatural[4];
+uniform bool uBurnOn;
+uniform vec4 uBurn; // 圆心 x, 圆心 z, 火线半径, 火线宽度（与模型 shader 共用同一个对象）
+uniform float uTime;
 
 in vec3 vNormalW;
 in vec2 vCell;
 in float vElev;
+in vec2 vWorldXZ;
 
 #include <fog_pars_fragment>
 
@@ -77,6 +83,19 @@ vec4 bilinear(vec2 p) {
   vec4 a = mix(cellAt(c), cellAt(c + ivec2(1, 0)), f.x);
   vec4 b = mix(cellAt(c + ivec2(0, 1)), cellAt(c + ivec2(1, 1)), f.x);
   return mix(a, b, f.y);
+}
+
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash12(i), hash12(i + vec2(1, 0)), f.x), mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), f.x), f.y);
 }
 
 vec3 ramp(float t) {
@@ -113,7 +132,9 @@ void main() {
     if (uHasSatellite) {
       col = texture(uSatellite, vec2((vCell.x + 0.5) / uGridSize.x, 1.0 - (vCell.y + 0.5) / uGridSize.y)).rgb;
     } else {
-      vec3 veg = mix(mix(uNatural[0], uNatural[1], fuel), uNatural[2], dryness * 0.3);
+      // 燃料到覆盖度的曲线：中等燃料就已经是大片深色灌丛，稀疏处才露出干草
+      float cover = smoothstep(0.08, 0.6, fuel);
+      vec3 veg = mix(mix(uNatural[0], uNatural[1], cover), uNatural[2], dryness * 0.25);
       col = w.x * uClassColors[0] + w.y * veg + w.z * uNatural[3];
     }
   } else if (uLayer == 1) {
@@ -140,6 +161,21 @@ void main() {
   float sky = 0.5 + 0.5 * n.y;
   col *= 0.32 + 0.18 * sky + 0.72 * diffuse;
 
+  // 燃烧预览：燃尽为灰黑，火线处发光
+  float burnGlow = 0.0;
+  if (uBurnOn && w.x < 0.5) {
+    float d = length(vWorldXZ - uBurn.xy);
+    if (d < uBurn.z - uBurn.w) {
+      col = mix(col, vec3(0.06, 0.055, 0.05), 0.85);
+    } else if (d < uBurn.z) {
+      float t = (d - (uBurn.z - uBurn.w)) / uBurn.w;
+      // 两层噪声叠加的不规则闪烁，避免正弦造成的规则条纹
+      float flick = 0.35 + 0.65 * vnoise(vWorldXZ * 0.03 + vec2(uTime * 0.9, -uTime * 0.6)) * (0.6 + 0.4 * vnoise(vWorldXZ * 0.11 - uTime * 2.3));
+      burnGlow = smoothstep(0.0, 0.5, t) * (1.0 - smoothstep(0.7, 1.0, t)) * flick;
+      col = mix(col * 0.4, vec3(0.08, 0.06, 0.05), 1.0 - t);
+    }
+  }
+
   // 悬停格子描边
   vec2 d = abs(vCell - uHover);
   float m = max(d.x, d.y);
@@ -148,6 +184,7 @@ void main() {
     col = mix(col * 1.25, vec3(1.0, 0.85, 0.2), edge);
   }
 
+  col += vec3(1.0, 0.4, 0.06) * burnGlow * 1.6;
   gl_FragColor = vec4(col, 1.0);
   #include <colorspace_fragment>
   #include <fog_fragment>
@@ -209,8 +246,12 @@ export class Terrain {
           uSunDir: { value: new THREE.Vector3(-0.6, 0.8, 0.4).normalize() },
           uHover: { value: new THREE.Vector2(-10, -10) },
           uSatellite: { value: null },
+          uBurnOn: { value: false },
+          uBurn: { value: new THREE.Vector4() },
+          uTime: { value: 0 },
           uHasSatellite: { value: false },
-          uNatural: { value: ["#a89a63", "#3d5a2c", "#9e8550", "#cfcac0"].map((c) => new THREE.Color(c)) },
+          // 建筑格的地面：有 3D 房屋后不再画成浅白块，改为院落草地与铺装的混合色
+          uNatural: { value: ["#a89a63", "#3d5a2c", "#9e8550", "#9c9a84"].map((c) => new THREE.Color(c)) },
           uClassColors: {
             value: [CLASS_COLORS.unburnable, CLASS_COLORS.vegetation, CLASS_COLORS.building].map((c) => new THREE.Color(c)),
           },

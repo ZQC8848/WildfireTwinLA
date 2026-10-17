@@ -134,7 +134,8 @@ export function createMockGrid(width = 512, height = 512, cellSize = 25, seed = 
       const cell = cellIndex(meta, x, y);
       if (data[cell * GRID_CHANNELS + 3] !== CellClass.Building) continue;
       communities[Math.min(2, Math.floor((x / width) * 3))].cells.push(cell);
-      if (x % 3 !== 0 || y % 3 !== 0) continue;
+      // 每 2×2 格一栋，间距约 50 m，接近 Altadena 的独栋住宅密度
+      if (x % 2 !== 0 || y % 2 !== 0) continue;
       const e = originUTM[0] + (x + 0.5) * cellSize;
       const n = originUTM[1] - (y + 0.5) * cellSize;
       buildings.push({
