@@ -1,6 +1,89 @@
-import type {Grid,WindField} from './types.ts';
-import {neighbors,canStep} from './grid.ts';
-import {edgeMinutes} from './spread.ts';
-class Heap { a:[number,number][]=[];push(c:number,t:number){const a=this.a;let i=a.length;a.push([c,t]);while(i){const p=(i-1)>>1;if(a[p][1]<=t)break;a[i]=a[p];i=p;}a[i]=[c,t];}pop():[number,number]{const a=this.a,out=a[0],last=a.pop()!;if(a.length){let i=0;while(i*2+1<a.length){let j=i*2+1;if(j+1<a.length&&a[j+1][1]<a[j][1])j++;if(a[j][1]>=last[1])break;a[i]=a[j];i=j;}a[i]=last;}return out;}}
-export function shortestPaths(g:Grid,ignitions:number[],wind:WindField,mask:Uint8Array){const n=g.meta.width*g.meta.height;if(mask.length!==n||mask.some(x=>x>4))throw Error('Invalid mask');const arrival=new Float64Array(n).fill(Infinity),parent=new Int32Array(n).fill(-1),order:number[]=[],heap=new Heap();for(const c of ignitions){if(!Number.isInteger(c)||c<0||c>=n)throw Error('Invalid ignition');if(g.data[c*4+3]===0)continue;if(arrival[c]===0)continue;arrival[c]=0;heap.push(c,0);}while(heap.a.length){const [u,t]=heap.pop();if(t!==arrival[u])continue;order.push(u);for(const v of neighbors(g,u)){if(!canStep(g,u,v))continue;const alt=t+edgeMinutes(g,u,v,wind,mask);if(alt<arrival[v]){arrival[v]=alt;parent[v]=u;heap.push(v,alt);}}}return {arrival,parent,order};}
-export function pathFlow(parent:Int32Array,order:number[],targets:{cell:number;weight:number}[]):Float64Array {const flow=new Float64Array(parent.length);for(const t of targets)flow[t.cell]+=t.weight;for(let i=order.length-1;i>=0;i--){const c=order[i];if(parent[c]>=0)flow[parent[c]]+=flow[c];}return flow;}
+import type { Grid, WindField, ArrivalOptions } from './types.ts';
+import { buildArrivalGraph, travelMinutes } from './arrivalGraph.ts';
+import type { ArrivalGraph } from './arrivalGraph.ts';
+class Heap {
+    a: [
+        number,
+        number
+    ][] = [];
+    push(c: number, t: number) {
+        const a = this.a;
+        let i = a.length;
+        a.push([c, t]);
+        while (i) {
+            const p = (i - 1) >> 1;
+            if (a[p][1] <= t)
+                break;
+            a[i] = a[p];
+            i = p;
+        }
+        a[i] = [c, t];
+    }
+    pop(): [
+        number,
+        number
+    ] {
+        const a = this.a, out = a[0], last = a.pop()!;
+        if (a.length) {
+            let i = 0;
+            while (i * 2 + 1 < a.length) {
+                let j = i * 2 + 1;
+                if (j + 1 < a.length && a[j + 1][1] < a[j][1])
+                    j++;
+                if (a[j][1] >= last[1])
+                    break;
+                a[i] = a[j];
+                i = j;
+            }
+            a[i] = last;
+        }
+        return out;
+    }
+}
+export function shortestPaths(g: Grid, ignitions: number[], wind: WindField, mask: Uint8Array, options: ArrivalOptions = {}, prepared?: ArrivalGraph) {
+    const graph = prepared ?? buildArrivalGraph(g, wind, options);
+    const n = g.meta.width * g.meta.height;
+    if (mask.length !== n || mask.some(x => x > 4))
+        throw Error('Invalid mask');
+    const arrival = new Float64Array(n).fill(Infinity), parent = new Int32Array(n).fill(-1), order: number[] = [], heap = new Heap();
+    for (const c of ignitions) {
+        if (!Number.isInteger(c) || c < 0 || c >= n)
+            throw Error('Invalid ignition');
+        if (g.data[c * 4 + 3] === 0)
+            continue;
+        if (arrival[c] === 0)
+            continue;
+        arrival[c] = 0;
+        heap.push(c, 0);
+    }
+    while (heap.a.length) {
+        const [u, t] = heap.pop();
+        if (t !== arrival[u])
+            continue;
+        order.push(u);
+        for (const edge of graph.outgoing[u]) {
+            const v = edge.to;
+            const alt = t + travelMinutes(edge, mask, graph);
+            if (alt < arrival[v]) {
+                arrival[v] = alt;
+                parent[v] = u;
+                heap.push(v, alt);
+            }
+        }
+    }
+    return { arrival, parent, order };
+}
+export function pathFlow(parent: Int32Array, order: number[], targets: {
+    cell: number;
+    weight: number;
+}[]): Float64Array {
+    const flow = new Float64Array(parent.length);
+    for (const t of targets)
+        flow[t.cell] += t.weight;
+    for (let i = order.length - 1; i >= 0; i--) {
+        const c = order[i];
+        if (parent[c] >= 0)
+            flow[parent[c]] += flow[c];
+    }
+    return flow;
+}

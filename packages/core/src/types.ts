@@ -67,6 +67,7 @@ export interface Treatment {
 }
 
 export interface Metrics {
+  /** Expected ember-exposed home count; synthetic planning proxy, not alert probability. */
   buildingsThreatened: number;
   burnedAreaHa: number;
   cost: number;
@@ -79,8 +80,28 @@ export interface PlanRequest {
   scenarios: WindScenario[];
 }
 
+export interface ArrivalOptions {
+  /** Resolution of the GPU CA being approximated, even on a coarser planning grid. */
+  referenceCellSize?: number;
+  /** Dimensionless fit to paired CA arrivals. 1 is uncalibrated. */
+  timeScale?: number;
+  spotting?: boolean;
+}
+
+export interface PlannerDiagnostics {
+  iterations: number;
+  spent: number;
+  stopReason: "no-beneficial-candidate" | "budget-exhausted" | "iteration-limit";
+  evaluatedCandidates: number;
+}
+
 export interface CoreOptions {
   buildings?: Building[];
+  spread?: ArrivalOptions;
+  /** Initial exact candidate solves per iteration (24); no-gain fallback can add 3×. */
+  candidateLimit?: number;
+  /** Additional odd strip lengths; defaults include 5, 11 and 21 cells. */
+  stripLengths?: number[];
   allowed?: (type: TreatmentType, cell: number) => boolean;
   cost?: (type: TreatmentType, cell: number) => number;
   stripLength?: number;
