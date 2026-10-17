@@ -42,7 +42,8 @@ export function createScene(container: HTMLElement): SceneContext {
   scene.add(sun);
 
   const stats = new Stats();
-  stats.dom.style.cssText = "position:fixed;top:0;left:0;";
+  stats.dom.style.cssText = "position:fixed;top:60px;right:8px;left:auto;z-index:30;";
+  stats.dom.classList.add("stats");
   document.body.appendChild(stats.dom);
 
   window.addEventListener("resize", () => {
