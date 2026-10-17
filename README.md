@@ -4,6 +4,7 @@
 
 - 活动：The Dual-Use Hackathon（InnovateLA × USC Viterbi，LA Tech Week 2026 闭幕活动，2026-10-16 至 10-18）
 - 详细技术方案：[docs/technical-design.md](docs/technical-design.md)
+- 团队分工与接口约定：[docs/team-plan.md](docs/team-plan.md)
 
 ## 核心功能
 
