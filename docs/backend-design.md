@@ -37,8 +37,7 @@ server/
 │   ├── realtime.py          # WebSocket 频道与广播
 │   └── providers/
 │       ├── firms.py
-│       ├── weather.py
-│       └── goes.py          # GOES ABI-L2-FDCC 适配器接口
+│       └── weather.py
 ├── tests/
 └── pyproject.toml
 ```
@@ -78,6 +77,7 @@ server/
 | `WS` | `/ws?mode=replay&event=eaton` | 与 live 同契约的回放流 |
 | `POST` | `/api/v1/residents` | 明示同意登记 |
 | `DELETE` | `/api/v1/residents/{id}` | 撤回同意并停止后续外呼 |
+| `POST` | `/api/v1/risks/evaluate` | 接收 C 模块的社区到达风险并推进告警状态机 |
 | `POST` | `/webhooks/retell` | 通话状态回写（验签） |
 
 WebSocket 连接成功后先发 `snapshot`，随后发送带单调递增 `sequence` 的消息。客户端发现序号缺口时重新请求 REST 快照，而不是猜测丢失状态。
@@ -98,9 +98,9 @@ WebSocket 连接成功后先发 `snapshot`，随后发送带单调递增 `sequen
 
 ## 7. 轮询与容错
 
-- FIRMS：5 分钟；同一周期拉取 SNPP、NOAA-20 和 MODIS，指数退避并记录水位线。
-- GOES：5 分钟；列出最新 ABI-L2-FDCC 对象，只处理高于水位线的新对象。MVP 可以先关闭此 adapter，不阻塞 FIRMS 演示。
-- 风况：60 分钟；Open-Meteo 5×5 点批量请求，换算 km/h 为 m/s。
+- FIRMS：5 分钟；同一周期拉取 SNPP、NOAA-20、NOAA-21 和 MODIS，并记录轮询状态。
+- GOES：通过 NASA FIRMS Area API 的 `GOES_NRT` 产品按相同周期拉取并归一化；若该产品对当前 map key 不可用，其他卫星源继续工作。后续需要像素级云产品时再接 NOAA `ABI-L2-FDCC` NetCDF 解码器。
+- 风况：60 分钟；Open-Meteo 5×5 点批量请求，并直接请求 m/s 单位。
 - 所有 provider 使用超时、有限重试、带 provider 名的指标；某个源失败不会清空现有事件。
 - 只有持有数据库 advisory lock 的 worker 执行轮询。SQLite MVP 强制单 worker。
 
@@ -118,12 +118,15 @@ WebSocket 连接成功后先发 `snapshot`，随后发送带单调递增 `sequen
 2. FIRMS + Open-Meteo 实时 adapter、SQLite 去重、DBSCAN 聚类。
 3. 接入 C 的 arrival grid，启用告警状态机。
 4. 住户 opt-in、Retell sandbox、验签 webhook。
-5. GOES 与 PostGIS；拆分 poller、API、call worker。
+5. PostGIS 与独立 worker；按分析需求增加 NOAA ABI-L2-FDCC 原始云产品解码。
 
-## 10. 关键决策
+## 10. 当前实现状态
+
+`server/` 已实现真实 provider adapter、SQLite 幂等存储、事件聚类、后台调度、REST/WS、告警迟滞、Retell 幂等外呼与验签回调。`data-pipeline/` 已实现 Sentinel-2 场景发现，以及 DEM、B04/B08/B11、SCL 与建筑 GeoJSON 的统一投影和二进制网格导出。真实在线运行仍需部署方提供 FIRMS 与 Retell 凭据。
+
+## 11. 关键决策
 
 - **不让浏览器直接访问 FIRMS/Retell**：避免泄露 key，并确保去重、回放和审计。
 - **不在在线服务做 GIS 重处理**：大栅格全部预生成，保证黑客松环境中的响应稳定。
 - **不把告警绑定在 GPU 前端**：浏览器关闭时告警仍能工作；后端消费 C 的确定性预测。
 - **先 SQLite 后 PostGIS**：MVP 数据量很小，repository 边界使迁移不影响 API。
-

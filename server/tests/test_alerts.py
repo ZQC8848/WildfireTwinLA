@@ -30,6 +30,12 @@ class AlertTests(unittest.TestCase):
         decision = evaluate_alert(AlertLevel.NONE, risk(0.5, 0.2, 0.1))
         self.assertEqual(decision.current, AlertLevel.IMMINENT)
 
+    def test_downgrade_requires_two_consecutive_low_observations(self) -> None:
+        first = evaluate_alert(AlertLevel.WARNING, risk(0.1, 0.1, 0.1))
+        second = evaluate_alert(AlertLevel.WARNING, risk(0.1, 0.1, 0.1), first.below_count)
+        self.assertEqual(first.current, AlertLevel.WARNING)
+        self.assertEqual(second.current, AlertLevel.NONE)
+
 
 if __name__ == "__main__":
     unittest.main()

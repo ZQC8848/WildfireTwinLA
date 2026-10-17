@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 from enum import IntEnum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -20,6 +20,8 @@ class Hotspot(BaseModel):
     acquired_at: datetime
     frp: float = Field(default=0, ge=0)
     confidence: float = Field(ge=0, le=1)
+    satellite: str | None = None
+    raw: dict[str, Any] = Field(default_factory=dict, exclude=True)
 
 
 class Incident(BaseModel):
@@ -28,6 +30,22 @@ class Incident(BaseModel):
     centroid_lat: float
     centroid_lon: float
     latest_at: datetime
+    status: Literal["active", "closed"] = "active"
+    hotspot_count: int = 0
+
+
+class WindPoint(BaseModel):
+    lat: float
+    lon: float
+    speed_ms: float = Field(ge=0)
+    direction_from_deg: float = Field(ge=0, lt=360)
+    gust_ms: float = Field(ge=0)
+    relative_humidity: float = Field(ge=0, le=100)
+
+
+class WindSnapshot(BaseModel):
+    observed_at: datetime
+    points: list[WindPoint]
 
 
 class ResidentCreate(BaseModel):
@@ -56,6 +74,21 @@ class ArrivalRisk(BaseModel):
     probability_3h: float = Field(ge=0, le=1)
     probability_6h: float = Field(ge=0, le=1)
     eta_min: float = Field(ge=0)
+
+
+class AlertResult(BaseModel):
+    community_id: str
+    incident_id: str
+    previous: AlertLevel
+    current: AlertLevel
+    changed: bool
+    calls_queued: int = 0
+    reason: str
+
+
+class RetellWebhookEvent(BaseModel):
+    event: str
+    call: dict[str, Any]
 
 
 class ServerMessage(BaseModel):

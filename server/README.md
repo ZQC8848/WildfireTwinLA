@@ -13,12 +13,25 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
-Run the dependency-free unit tests with:
+Run lint and tests with:
 
 ```bash
-python -m unittest discover -s tests -v
+ruff check .
+pytest -q
 ```
 
-Pollers default to disabled so local runs do not require external credentials. `GET /healthz`
-and the WebSocket at `/ws?mode=live` are ready for frontend integration.
+Pollers default to disabled so local runs do not require external credentials. To enable the
+live backend, set `WILDFIRE_ENABLE_POLLERS=true` and provide a NASA FIRMS map key. FIRMS
+VIIRS/MODIS and GOES NRT are normalized to the same hotspot model; Open-Meteo provides a
+5×5 wind field. Configure the three `WILDFIRE_RETELL_*` values to enable calls.
 
+Useful integration points:
+
+- `GET /readyz` reports provider watermarks and whether Retell is configured.
+- `WS /ws?mode=live` sends a snapshot followed by sequenced hotspot, incident, wind and alert events.
+- `POST /api/v1/risks/evaluate` consumes the simulator's community arrival probabilities.
+- `POST /api/v1/residents` and `DELETE /api/v1/residents/{id}` implement opt-in and revocation.
+- `POST /webhooks/retell` verifies Retell signatures and stores call outcomes.
+
+This service is a non-official decision-support system. Do not represent its modeled alerts as
+government evacuation orders.

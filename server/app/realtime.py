@@ -11,6 +11,10 @@ class RealtimeHub:
         self._lock = asyncio.Lock()
         self._sequence = 0
 
+    @property
+    def sequence(self) -> int:
+        return self._sequence
+
     async def connect(self, websocket: WebSocket) -> None:
         await websocket.accept()
         async with self._lock:
