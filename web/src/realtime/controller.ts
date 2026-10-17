@@ -154,6 +154,11 @@ export class RealtimeController {
     this.d.onChange();
   }
 
+  /** 某栋房屋最近一次外呼的结果（confirmed、no_answer、needs_help 等）；没有记录时为 undefined */
+  callStatus(buildingId: string): string | undefined {
+    return this.calls.get(buildingId);
+  }
+
   callTally(): CallTally {
     const t = { confirmed: 0, noAnswer: 0, needsHelp: 0, other: 0 };
     for (const s of this.calls.values()) {

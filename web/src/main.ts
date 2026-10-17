@@ -31,6 +31,9 @@ import { NORTE_SCENARIO, norteIgnitionCells } from "./data/norte";
 import { FUEL_GROUP_COLORS, FuelGroup, fuelGroups, fuelModelName } from "./data/fuelModel";
 import { LAYERS } from "./scene/layers";
 import { loadRoads, rasterizeRoads } from "./scene/roads";
+import { HomeStatus, type HomeAlert } from "./sim/homeStatus";
+import { HomeAlerts } from "./ui/homeAlerts";
+import { HouseFlames } from "./scene/houseFlames";
 import { ENSEMBLE_FACTOR, ENSEMBLE_MEMBERS, Ensemble, communityOutlook, type CommunityOutlook, type EnsembleResult } from "./sim/ensemble";
 
 const q = new URLSearchParams(location.search);
@@ -302,6 +305,7 @@ const shell = new Shell(
       refreshPanels();
     },
     onForecast: () => runForecast(),
+    onShowAlerts: (show) => homeAlerts.setVisible(show),
     onShowForecast: (show) => {
       forecastShown = show;
       showForecast();
@@ -365,6 +369,7 @@ const resetSim = () => {
   smoke.clear();
   monitor.reset();
   clearForecast();
+  refreshHomes();
   simParams.running = false;
   shell.setRunning(false);
 };
@@ -390,6 +395,7 @@ function setMode(mode: Mode) {
   shell.setMode(mode);
   nightTarget = mode === "respond" ? 1 : 0;
   terrain.showDamageArea(mode === "respond");
+  homeAlerts.setNight(mode === "respond");
   if (mode === "respond") terrain.layer = "natural";
   else terrain.layer = (document.getElementById("layer") as HTMLSelectElement).value as LayerId;
   if (reducedMotion) {
@@ -449,6 +455,90 @@ const realtime: RealtimeController = new RealtimeController({
   addIgnitions: (cells) => testIgnitions.push(...cells),
   onChange: () => refreshPanels(),
 });
+// ---- 房屋受损：冒泡提示与屋顶火苗 ----
+// 每栋房屋的锚点：屋顶上方 4 m；火苗站在屋顶上，尺寸取房屋水平尺寸
+const roofAnchors: THREE.Vector3[] = [];
+const roofSize: number[] = [];
+for (const p of layout.items) {
+  if (p.building === undefined) continue;
+  const box = lib[p.asset][p.variant].box;
+  const top = (p.elev - terrain.minElev) * terrain.verticalScale + box.max.y * p.scale;
+  roofAnchors[p.building] = new THREE.Vector3(p.x, top + 4, p.z);
+  roofSize[p.building] = Math.max(6, Math.max(box.max.x - box.min.x, box.max.z - box.min.z) * p.scale * 0.8);
+}
+bundle.buildings.forEach((b, i) => {
+  if (roofAnchors[i]) return;
+  const [x, y] = cellXY(meta, b.cell);
+  roofAnchors[i] = new THREE.Vector3((x - (meta.width - 1) / 2) * meta.cellSize, (grid.data[b.cell * GRID_CHANNELS] - terrain.minElev) * terrain.verticalScale + 10, (y - (meta.height - 1) / 2) * meta.cellSize);
+  roofSize[i] = 8;
+});
+const homeStatus = new HomeStatus(grid, bundle.buildings, roofAnchors, bundle.communities);
+const houseFlames = new HouseFlames();
+ctx.scene.add(houseFlames.object);
+const describeHome = (a: HomeAlert): { title: string; rows: [string, string][] } => {
+  const rows: [string, string][] = [];
+  if (a.community) rows.push(["Community", a.community]);
+  if (a.state === "threat") {
+    if (a.etaMin !== undefined) rows.push(["Fire expected", a.etaMin < 5 ? "any minute" : `in about ${formatMinutes(Math.round(a.etaMin / 5) * 5)}`]);
+    if (a.distanceM !== undefined) rows.push(["Nearest fire", `${Math.round(a.distanceM / 10) * 10} m upwind`]);
+    if (a.chance !== undefined) rows.push(["Chance in 8 hours", `${Math.round(a.chance * 100)}%`]);
+  } else if (a.ignitedMin !== undefined) {
+    rows.push(["Ignited", `T + ${formatMinutes(a.ignitedMin)}, by embers`]);
+  }
+  rows.push(["Home hardening", a.hardened ? "Yes (Zone 0)" : "No"]);
+  const call = realtime.callStatus(bundle.buildings[a.id].id);
+  if (call) rows.push(["Resident call", call.replace(/_/g, " ")]);
+  rows.push(["Source", a.state === "threat" && a.chance !== undefined ? "64-run forecast" : "Simulation"]);
+  const titles = { burning: "Home on fire", burned: "Home destroyed", threat: "Home threatened" };
+  return { title: titles[a.state], rows };
+};
+const homeAlerts = new HomeAlerts(
+  ctx.camera,
+  ctx.renderer.domElement,
+  {
+    onHover: (title, rows, x, y) => shell.showHover(x, y, title, rows),
+    onLeave: () => shell.hideHover(),
+    onFly: (target, distance) => {
+      // 保持当前的观察方向，拉近到指定距离
+      const dir = ctx.camera.position.clone().sub(ctx.controls.target).normalize();
+      if (dir.y < 0.35) dir.setY(0.35).normalize();
+      rig.flyTo(target.clone().addScaledVector(dir, distance), target);
+    },
+  },
+  describeHome,
+);
+function refreshHomes() {
+  if (!simActive || !sim.lastState) {
+    homeStatus.reset();
+    homeAlerts.setItems([]);
+    houseFlames.set([]);
+    return;
+  }
+  const [ux, uy] = windToGrid(inflow());
+  const len = Math.hypot(ux, uy);
+  const alerts = homeStatus.update({
+    state: sim.lastState,
+    viewMinutes: viewMinutes ?? sim.minutes,
+    live: viewMinutes === null,
+    nowMinutes: sim.minutes,
+    stepMinutes: SpreadParams.stepMinutes,
+    forecast,
+    downwind: len > 0.5 ? [ux / len, uy / len] : null,
+    spreadRate: monitor.spreadRate,
+    treatMask: sim.treatMask,
+  });
+  homeAlerts.setItems(alerts);
+  houseFlames.set(
+    alerts
+      .filter((a) => a.state === "burning")
+      .map((a) => ({ position: a.anchor.clone().setY(a.anchor.y - 4), size: roofSize[a.id], seed: (a.id % 997) / 997 })),
+  );
+}
+ctx.onFrame((dt) => {
+  houseFlames.material.uniforms.uTime.value += dt;
+  homeAlerts.update();
+});
+
 let pending: PointerEvent | null = null;
 ctx.renderer.domElement.addEventListener("pointermove", (e) => (pending = e));
 ctx.renderer.domElement.addEventListener("pointerleave", () => {
@@ -594,6 +684,7 @@ ctx.onFrame((dt) => {
 });
 
 function refreshPanels() {
+  refreshHomes();
   shell.setElapsed(simActive ? sim.minutes : null);
   shell.setViewAvailable(simActive && (sim.burningSample.length > 0 || testIgnitions.length > 0));
   shell.setTimeline(
@@ -844,4 +935,4 @@ if (modeParam === "respond" || modeParam === "plan") {
 }
 
 // 调试用
-Object.assign(window, { bundle, ctx, terrain, props, layout, sim, smoke, monitor, shell, runCpuCheck, realtime, planner, ensemble, runForecast, runBench, getForecast: () => ({ forecast, outlook }) });
+Object.assign(window, { bundle, ctx, terrain, props, layout, sim, smoke, monitor, shell, runCpuCheck, realtime, planner, ensemble, runForecast, runBench, getForecast: () => ({ forecast, outlook }), homeStatus, homeAlerts, houseFlames });

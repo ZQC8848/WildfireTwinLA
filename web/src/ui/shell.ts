@@ -34,6 +34,7 @@ export interface ShellHandlers {
   onLayer(layer: LayerId): void;
   onShowWind(show: boolean): void;
   onForecast(): void;
+  onShowAlerts(show: boolean): void;
   onShowForecast(show: boolean): void;
   onShowSmoke(show: boolean): void;
   onTool(tool: Tool | null): void;
@@ -231,6 +232,7 @@ export class Shell {
           <div id="rose-label" class="figure"></div>
           <label class="map-card-row"><input type="checkbox" id="show-wind" /> Show wind arrows</label>
           <label class="map-card-row"><input type="checkbox" id="show-smoke" checked /> Show smoke</label>
+          <label class="map-card-row" title="Shortcut: H"><input type="checkbox" id="show-alerts" checked /> Show home alerts</label>
         </div>
       </div>`;
 
@@ -299,12 +301,19 @@ export class Shell {
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || e.metaKey || e.ctrlKey || e.altKey) return;
       const view = ({ "1": "overview", "2": "fire", "3": "community" } as Record<string, ViewPreset>)[e.key];
       if (view) this.handlers.onView(view);
+      // H：开关房屋冒泡提示
+      if (e.key === "h" || e.key === "H") {
+        const box = this.q<HTMLInputElement>("#show-alerts");
+        box.checked = !box.checked;
+        this.handlers.onShowAlerts(box.checked);
+      }
     });
     const timeline = this.q<HTMLInputElement>("#timeline");
     timeline.addEventListener("input", () => this.handlers.onScrub(Number(timeline.value)));
     this.q<HTMLButtonElement>("#now").addEventListener("click", () => this.handlers.onNow());
     this.setBrush(3);
     this.q<HTMLInputElement>("#show-smoke").addEventListener("change", (e) => this.handlers.onShowSmoke((e.target as HTMLInputElement).checked));
+    this.q<HTMLInputElement>("#show-alerts").addEventListener("change", (e) => this.handlers.onShowAlerts((e.target as HTMLInputElement).checked));
     this.q<HTMLButtonElement>("#forecast-run").addEventListener("click", () => this.handlers.onForecast());
     this.q<HTMLInputElement>("#forecast-show").addEventListener("change", (e) => this.handlers.onShowForecast((e.target as HTMLInputElement).checked));
 

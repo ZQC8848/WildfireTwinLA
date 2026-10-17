@@ -895,3 +895,150 @@ body.painting #app canvas {
   color: var(--ink-muted);
   line-height: 1.3;
 }
+
+/* ---- 房屋冒泡提示（ui/homeAlerts.ts）：在画布之上、侧栏与地图卡片之下 ---- */
+.home-alerts {
+  position: fixed;
+  z-index: 8;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.home-alerts[hidden] {
+  display: none;
+}
+
+.alert-bubble {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 24px;
+  min-width: 24px;
+  padding: 0 6px;
+  margin: 0 0 8px;
+  border: 0;
+  border-radius: 12px;
+  font-family: var(--font-figure);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+  transform-origin: 50% 100%;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.35);
+}
+
+.alert-bubble[hidden] {
+  display: none;
+}
+
+/* 指向房屋的小尖角 */
+.alert-bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  background: inherit;
+  transform: rotate(45deg);
+  border-radius: 0 0 2px 0;
+  z-index: -1;
+}
+
+.alert-bubble:focus-visible {
+  outline: 2px solid var(--marine);
+  outline-offset: 2px;
+}
+
+.alert-bubble svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.alert-icon {
+  display: inline-flex;
+}
+
+/* 着火：Ember 实底，图标脉动 */
+.alert-bubble.burning {
+  background: var(--ember);
+  color: #fff;
+}
+
+.alert-bubble.burning .alert-icon {
+  animation: alert-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes alert-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.18);
+  }
+}
+
+/* 烧毁：深色底 */
+.alert-bubble.burned {
+  background: #2b231f;
+  color: var(--ash);
+  height: 20px;
+  min-width: 20px;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgb(229 231 225 / 0.25), 0 2px 6px rgb(0 0 0 / 0.35);
+}
+
+.alert-bubble.burned svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* 受威胁：浅色底、橙色描边，附预计到达时间 */
+.alert-bubble.threat {
+  background: var(--ash);
+  color: #2b231f;
+  box-shadow: inset 0 0 0 1.5px var(--ember), 0 2px 6px rgb(0 0 0 / 0.3);
+}
+
+.alert-bubble.threat .alert-icon {
+  color: var(--ember);
+}
+
+.alert-eta {
+  font-size: 11px;
+}
+
+.alert-bubble.cluster {
+  padding: 0 8px;
+}
+
+.alert-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: 4px;
+  padding-left: 5px;
+  border-left: 1px solid currentColor;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.alert-sub svg {
+  width: 11px;
+  height: 11px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .alert-bubble.burning .alert-icon {
+    animation: none;
+  }
+}

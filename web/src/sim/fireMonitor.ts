@@ -78,6 +78,11 @@ export class FireMonitor {
     });
   }
 
+  /** 火线朝各社区推进的最快速度（米 / 模拟分钟）；没有火或火在后退时为 0 */
+  get spreadRate(): number {
+    return Math.max(0, ...this.history.map((h) => h.rate || 0));
+  }
+
   log(minutes: number, text: string, level: Level = "watch") {
     this.events.unshift({ minutes, text, level });
     if (this.events.length > 150) this.events.length = 150;

@@ -98,7 +98,8 @@ export class PropField {
       order.forEach((idx, j) => {
         const p = list[idx];
         offset.set([p.x, p.elev, p.z, p.rot], j * 4);
-        params.set([p.scale, p.cell], j * 2);
+        // 建筑的缩放存为负数，shader 据此区分建筑与植被（燃尽后的外观不同）
+        params.set([p.building !== undefined ? -p.scale : p.scale, p.cell], j * 2);
         chunkStart[chunks[idx] + 1]++;
       });
       for (let k = 0; k < nChunks; k++) chunkStart[k + 1] += chunkStart[k];
