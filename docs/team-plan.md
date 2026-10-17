@@ -7,8 +7,8 @@
 | 角色 | 负责人 | 负责模块 | 需要的能力 |
 |---|---|---|---|
 | **A：3D 与 GPU 模拟** | Qinchuan | Three.js 场景与渲染、GPU 元胞自动机、64 路集合预报、时间轴、画防火带的笔刷交互、方案对比界面 | 图形、shader、前端 |
-| **B：数据与实时后端** | 队友 1 | 离线数据预处理（DEM、Sentinel-2、建筑统一成网格）；FIRMS、GOES、风况轮询；火点聚类；WebSocket 推送；告警规则；Retell 外呼与住户登记 | Python GIS、Node 或 Python 后端 |
-| **C：防控算法与验证** | 队友 2 | ROS 蔓延速率模型、Dijkstra 到达时间、路径流量、贪心优化、最小割基线、方案评估指标；Eaton 回放验证（IoU、Δt 标定） | 算法；土木或环境工程背景更佳 |
+| **B：数据与实时后端** | Tia | 离线数据预处理（DEM、Sentinel-2、建筑统一成网格）；FIRMS、GOES、风况轮询；火点聚类；WebSocket 推送；告警规则；Retell 外呼与住户登记 | Python GIS、Node 或 Python 后端 |
+| **C：防控算法与验证** | Lucia | ROS 蔓延速率模型、Dijkstra 到达时间、路径流量、贪心优化、最小割基线、方案评估指标；Eaton 回放验证（IoU、Δt 标定） | 算法；土木或环境工程背景更佳 |
 
 关键的边界划分：
 
