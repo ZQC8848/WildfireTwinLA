@@ -80,7 +80,7 @@ export class FireMonitor {
 
   log(minutes: number, text: string, level: Level = "watch") {
     this.events.unshift({ minutes, text, level });
-    if (this.events.length > 40) this.events.length = 40;
+    if (this.events.length > 150) this.events.length = 150;
   }
 
   /** state：模拟读回的 RGBA 状态；burning：燃烧格抽样 */

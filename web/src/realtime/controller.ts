@@ -277,7 +277,8 @@ export class RealtimeController {
         }
         for (const h of reports) {
           sim.igniteDisc(h.cell % W, Math.floor(h.cell / W), 1.5);
-          const name = h.id.replace(/^report-/, "").toUpperCase();
+          // 兼容 "report-norte"（前端内置回放）与 "norte-report"（后端回放）两种 id
+          const name = h.id.replace(/^report-|-report$/g, "").toUpperCase();
           this.reports.push({ minutes: sim.minutes, name });
           monitor.log(sim.minutes, `Reported ignition: ${name} (NIFC incident record)`, "warning");
         }

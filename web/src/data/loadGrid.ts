@@ -11,6 +11,15 @@ async function fetchJSON<T>(name: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** 约定的轮廓是 [lon, lat] 数组；也接受 GeoJSON Polygon / MultiPolygon（取外环，多面取第一个） */
+function normalizeFootprint(b: Building): Building {
+  const p = b.polygonLonLat as unknown;
+  if (!p || Array.isArray(p)) return b;
+  const g = p as { type?: string; coordinates?: unknown };
+  const ring = g.type === "Polygon" ? (g.coordinates as [number, number][][])?.[0] : g.type === "MultiPolygon" ? (g.coordinates as [number, number][][][])?.[0]?.[0] : undefined;
+  return { ...b, polygonLonLat: ring?.map(([lon, lat]) => [lon, lat] as [number, number]) };
+}
+
 export async function loadGrid(): Promise<GridBundle> {
   const forceMock = new URLSearchParams(location.search).has("mock");
   if (!forceMock) {
@@ -25,7 +34,7 @@ export async function loadGrid(): Promise<GridBundle> {
         fetchJSON<Building[]>("buildings.json").catch(() => []),
         fetchJSON<Community[]>("communities.json").catch(() => []),
       ]);
-      return { grid: { meta, data }, buildings, communities, source: "real" };
+      return { grid: { meta, data }, buildings: buildings.map(normalizeFootprint), communities, source: "real" };
     } catch (err) {
       console.info("[loadGrid] Falling back to synthetic grid:", (err as Error).message);
     }
