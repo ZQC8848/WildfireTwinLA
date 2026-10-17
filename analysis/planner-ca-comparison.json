@@ -1,0 +1,76 @@
+{
+  "calibration": {
+    "currentTimeScale": 0.35,
+    "suggestedTimeScale": 0.34689880150206664,
+    "trainingSeed": 1,
+    "samples": 540,
+    "multiplierOnCurrentScale": 0.9911394328630476,
+    "heldOutSamples": 1054,
+    "heldOutMAEMinutes": 66.29045874688421
+  },
+  "label": "SYNTHETIC CA REFERENCE — NOT EATON",
+  "width": 128,
+  "seeds": 3,
+  "reports": [
+    {
+      "speedMs": 3,
+      "pairedHomes": 460,
+      "coarsePairedHomes": 460,
+      "caMeanMinutes": 309.94565217391306,
+      "fineMeanMinutes": 351.0788040161133,
+      "coarseMeanMinutes": 371.62461236041526,
+      "coarseRatio": 1.2597047193141988,
+      "planMs": 72.29548699999987,
+      "types": [
+        "zone0",
+        "zone0"
+      ],
+      "diagnostics": {
+        "iterations": 2,
+        "spent": 8000,
+        "stopReason": "iteration-limit",
+        "evaluatedCandidates": 24
+      }
+    },
+    {
+      "speedMs": 6,
+      "pairedHomes": 551,
+      "coarsePairedHomes": 551,
+      "caMeanMinutes": 231.55172413793105,
+      "fineMeanMinutes": 207.0054364213061,
+      "coarseMeanMinutes": 193.50789995418486,
+      "coarseRatio": 0.9227870275089932,
+      "planMs": 48.7791159999997,
+      "types": [
+        "zone0",
+        "zone0"
+      ],
+      "diagnostics": {
+        "iterations": 2,
+        "spent": 8000,
+        "stopReason": "iteration-limit",
+        "evaluatedCandidates": 24
+      }
+    },
+    {
+      "speedMs": 10,
+      "pairedHomes": 583,
+      "coarsePairedHomes": 583,
+      "caMeanMinutes": 200.50600343053173,
+      "fineMeanMinutes": 135.42871072811695,
+      "coarseMeanMinutes": 137.2391628834641,
+      "coarseRatio": 0.7805177221837215,
+      "planMs": 46.24752600000011,
+      "types": [
+        "zone0",
+        "zone0"
+      ],
+      "diagnostics": {
+        "iterations": 2,
+        "spent": 8000,
+        "stopReason": "iteration-limit",
+        "evaluatedCandidates": 24
+      }
+    }
+  ]
+}
