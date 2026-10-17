@@ -37,6 +37,8 @@ export class FireSim {
   burningSample: number[] = [];
   /** burningSample 每更新一次加 1 */
   sampleVersion = 0;
+  /** 最近一次读回的完整状态（RGBA，每格 4 个 float）；尚未读回时为 null */
+  lastState: Float32Array | null = null;
 
   constructor(
     private renderer: THREE.WebGLRenderer,
@@ -124,6 +126,7 @@ export class FireSim {
   reset() {
     this.step = 0;
     this.burningSample = [];
+    this.lastState = null;
     this.sampleVersion++;
     this.render(this.resetMat);
     this.render(this.resetMat);
@@ -172,6 +175,7 @@ export class FireSim {
         .readRenderTargetPixelsAsync(this.targets[this.cur], 0, 0, this.width, this.height, this.readBuf)
         .then(() => {
           this.lastStats = summarize(this.readBuf, this.grid, minutes, this.burningSample);
+          this.lastState = this.readBuf;
           this.sampleVersion++;
         })
         .finally(() => (this.reading = false));
@@ -188,7 +192,9 @@ export class FireSim {
 
   /** 同步读回并统计，同时刷新燃烧格抽样 */
   statsSync(): FireStats {
-    this.lastStats = summarize(this.readState(), this.grid, this.minutes, this.burningSample);
+    const state = this.readState();
+    this.lastStats = summarize(state, this.grid, this.minutes, this.burningSample);
+    this.lastState = state;
     this.sampleVersion++;
     return this.lastStats;
   }

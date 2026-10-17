@@ -1,0 +1,59 @@
+/* 设计 token，见 docs/ui-design.md 第四节。
+   六个基础色：Ash / Chaparral / Smoke / Ember / Retardant / Marine。其余颜色都从它们推导。
+   语义：橙色只属于火，粉红只属于人的干预，蓝色只属于风和水。 */
+
+@import "@fontsource/barlow/400.css";
+@import "@fontsource/barlow/500.css";
+@import "@fontsource/barlow/600.css";
+@import "@fontsource/barlow-semi-condensed/500.css";
+@import "@fontsource/barlow-semi-condensed/600.css";
+@import "@fontsource/barlow-condensed/600.css";
+
+:root {
+  --ash: #e5e7e1;
+  --chaparral: #22322a;
+  --smoke: #2b231f;
+  --ember: #f26a1b;
+  --retardant: #d63a73;
+  --marine: #6f9dbf;
+
+  --font-ui: "Barlow", system-ui, sans-serif;
+  --font-figure: "Barlow Semi Condensed", "Barlow", system-ui, sans-serif;
+  --font-display: "Barlow Condensed", "Barlow", system-ui, sans-serif;
+
+  /* 字号阶梯：13 / 15 / 18 / 24 / 40 / 72 */
+  --t-13: 13px;
+  --t-15: 15px;
+  --t-18: 18px;
+  --t-24: 24px;
+  --t-40: 40px;
+  --t-72: 72px;
+
+  --radius-float: 8px;
+  --radius-control: 4px;
+
+  --topbar-h: 52px;
+  --bottombar-h: 64px;
+  --rail-w: 320px;
+  --mode-ease: 1.2s cubic-bezier(0.45, 0, 0.2, 1);
+}
+
+/* Plan：白天的工作台 */
+body[data-mode="plan"] {
+  --surface: var(--ash);
+  --surface-raised: #eef0eb;
+  --ink: var(--chaparral);
+  --ink-muted: rgba(34, 50, 42, 0.66);
+  --rule: rgba(34, 50, 42, 0.16);
+  --scene-bg: #d4d8cf;
+}
+
+/* Respond：烟雾笼罩的夜晚 */
+body[data-mode="respond"] {
+  --surface: var(--smoke);
+  --surface-raised: #362d28;
+  --ink: var(--ash);
+  --ink-muted: rgba(229, 231, 225, 0.62);
+  --rule: rgba(229, 231, 225, 0.14);
+  --scene-bg: #1c1714;
+}

@@ -60,6 +60,7 @@ uniform bool uHasSatellite;
 uniform vec3 uClassColors[3];
 // 0 稀疏干草，1 茂密灌丛，2 干燥色调，3 建筑
 uniform vec3 uNatural[4];
+uniform float uNight; // 0 白天（Plan）到 1 夜间（Respond）
 uniform sampler2D uState; // 火势模拟状态：R = 0 未燃 / 1 燃烧中 / 2 已燃尽
 uniform bool uUseState;
 uniform bool uBurnOn;
@@ -162,6 +163,8 @@ void main() {
   float diffuse = max(dot(n, normalize(uSunDir)), 0.0);
   float sky = 0.5 + 0.5 * n.y;
   col *= 0.32 + 0.18 * sky + 0.72 * diffuse;
+  // Respond 模式：天色暗下来，火光（后面叠加）成为唯一的亮色
+  col *= mix(1.0, 0.38, uNight);
 
   // 火势状态：燃尽为灰黑，燃烧处发光。双线性混合四个格子，火场边缘不出现方格锯齿
   float burnGlow = 0.0;
@@ -265,6 +268,7 @@ export class Terrain {
           uSunDir: { value: new THREE.Vector3(-0.6, 0.8, 0.4).normalize() },
           uHover: { value: new THREE.Vector2(-10, -10) },
           uSatellite: { value: null },
+          uNight: { value: 0 },
           uState: { value: null },
           uUseState: { value: false },
           uBurnOn: { value: false },
