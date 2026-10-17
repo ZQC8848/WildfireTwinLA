@@ -1,0 +1,460 @@
+{
+  "status": "controlled-synthetic-experiment; real B1 fuel/terrain pending",
+  "observedSeparationM": 2481.7500405333863,
+  "observedDelayMinutes": 46.96666666666667,
+  "geometry": {
+    "radiusM": 375,
+    "cellSize": 25,
+    "wind": {
+      "speedMs": 8.7,
+      "dirFromDeg": 75
+    },
+    "target": 7565,
+    "targetX": 13.366292176442215,
+    "targetY": 59.22162657001987
+  },
+  "graph": {
+    "nearMiradaEarliestMinutes": 86.80558776855469,
+    "probabilityOfAnyIgnition": null,
+    "reason": "Dijkstra returns deterministic expected-path ETAs, not event probabilities.",
+    "hypotheticalBuildingExposureProxy50min": 0
+  },
+  "cpuCa": {
+    "engine": "actual CpuFireSim reference of GPU rules; float64 differs from WebGL",
+    "seeds": 32,
+    "hits": 6,
+    "probabilityEstimate": 0.1875,
+    "wilson95": [
+      0.08889423936162782,
+      0.3530949575492244
+    ],
+    "seedResults": [
+      {
+        "seed": 1,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 2,
+        "nearMiradaBy50min": true
+      },
+      {
+        "seed": 3,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 4,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 5,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 6,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 7,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 8,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 9,
+        "nearMiradaBy50min": true
+      },
+      {
+        "seed": 10,
+        "nearMiradaBy50min": true
+      },
+      {
+        "seed": 11,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 12,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 13,
+        "nearMiradaBy50min": true
+      },
+      {
+        "seed": 14,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 15,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 16,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 17,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 18,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 19,
+        "nearMiradaBy50min": true
+      },
+      {
+        "seed": 20,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 21,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 22,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 23,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 24,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 25,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 26,
+        "nearMiradaBy50min": true
+      },
+      {
+        "seed": 27,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 28,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 29,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 30,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 31,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 32,
+        "nearMiradaBy50min": false
+      }
+    ]
+  },
+  "gpuCa": {
+    "status": "passed",
+    "engine": "production FireSim WebGL shaders (headless Chromium / SwiftShader)",
+    "seeds": 32,
+    "hits": 6,
+    "probabilityEstimate": 0.1875,
+    "seedResults": [
+      {
+        "seed": 1,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 2,
+        "nearMiradaBy50min": true
+      },
+      {
+        "seed": 3,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 4,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 5,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 6,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 7,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 8,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 9,
+        "nearMiradaBy50min": true
+      },
+      {
+        "seed": 10,
+        "nearMiradaBy50min": true
+      },
+      {
+        "seed": 11,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 12,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 13,
+        "nearMiradaBy50min": true
+      },
+      {
+        "seed": 14,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 15,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 16,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 17,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 18,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 19,
+        "nearMiradaBy50min": true
+      },
+      {
+        "seed": 20,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 21,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 22,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 23,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 24,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 25,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 26,
+        "nearMiradaBy50min": true
+      },
+      {
+        "seed": 27,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 28,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 29,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 30,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 31,
+        "nearMiradaBy50min": false
+      },
+      {
+        "seed": 32,
+        "nearMiradaBy50min": false
+      }
+    ],
+    "scope": "controlled flat synthetic fixture, not real incident fuel/terrain",
+    "wilson95": [
+      0.08889423936162782,
+      0.3530949575492244
+    ]
+  },
+  "kernels": [
+    {
+      "speedMs": 3,
+      "proposal": false,
+      "samples": 200000,
+      "nearHits": 0,
+      "nearMiradaKernelProbability": 0,
+      "kernelWilson95": [
+        0,
+        1.92076310598226e-05
+      ],
+      "probabilityDistanceAtLeast": {
+        "1000m": 6e-05,
+        "2400m": 0,
+        "5000m": 0
+      },
+      "singleContinuouslyBurningSource50minUpperModel": 0,
+      "singleFuel08Source20minLifetime": 0.0
+    },
+    {
+      "speedMs": 3,
+      "proposal": true,
+      "samples": 200000,
+      "nearHits": 0,
+      "nearMiradaKernelProbability": 0,
+      "kernelWilson95": [
+        0,
+        1.92076310598226e-05
+      ],
+      "probabilityDistanceAtLeast": {
+        "1000m": 6e-05,
+        "2400m": 0,
+        "5000m": 0
+      },
+      "singleContinuouslyBurningSource50minUpperModel": 0,
+      "singleFuel08Source20minLifetime": 0.0
+    },
+    {
+      "speedMs": 6,
+      "proposal": false,
+      "samples": 200000,
+      "nearHits": 2,
+      "nearMiradaKernelProbability": 1e-05,
+      "kernelWilson95": [
+        2.7423075715685544e-06,
+        3.6464939335632845e-05
+      ],
+      "probabilityDistanceAtLeast": {
+        "1000m": 0.00367,
+        "2400m": 2e-05,
+        "5000m": 0
+      },
+      "singleContinuouslyBurningSource50minUpperModel": 8.319966254277666e-06,
+      "singleFuel08Source20minLifetime": 3.327994808399737e-06
+    },
+    {
+      "speedMs": 6,
+      "proposal": true,
+      "samples": 200000,
+      "nearHits": 15,
+      "nearMiradaKernelProbability": 7.5e-05,
+      "kernelWilson95": [
+        4.545304684855831e-05,
+        0.0001237517030666053
+      ],
+      "probabilityDistanceAtLeast": {
+        "1000m": 0.00475,
+        "2400m": 0.00031,
+        "5000m": 5.5e-05
+      },
+      "singleContinuouslyBurningSource50minUpperModel": 6.239810182773198e-05,
+      "singleFuel08Source20minLifetime": 2.4959707969451905e-05
+    },
+    {
+      "speedMs": 8.7,
+      "proposal": false,
+      "samples": 200000,
+      "nearHits": 34,
+      "nearMiradaKernelProbability": 0.00017,
+      "kernelWilson95": [
+        0.00012166167947731275,
+        0.00023753942098794951
+      ],
+      "probabilityDistanceAtLeast": {
+        "1000m": 0.01965,
+        "2400m": 0.000225,
+        "5000m": 5e-06
+      },
+      "singleContinuouslyBurningSource50minUpperModel": 0.00014143024786694713,
+      "singleFuel08Source20minLifetime": 5.65744996297024e-05
+    },
+    {
+      "speedMs": 8.7,
+      "proposal": true,
+      "samples": 200000,
+      "nearHits": 120,
+      "nearMiradaKernelProbability": 0.0006,
+      "kernelWilson95": [
+        0.0005018440847740682,
+        0.0007173404971284824
+      ],
+      "probabilityDistanceAtLeast": {
+        "1000m": 0.025535,
+        "2400m": 0.00235,
+        "5000m": 0.00063
+      },
+      "singleContinuouslyBurningSource50minUpperModel": 0.0004990785338894188,
+      "singleFuel08Source20minLifetime": 0.00019966131104021123
+    },
+    {
+      "speedMs": 10,
+      "proposal": false,
+      "samples": 200000,
+      "nearHits": 83,
+      "nearMiradaKernelProbability": 0.000415,
+      "kernelWilson95": [
+        0.00033481868087137156,
+        0.0005143730078546714
+      ],
+      "probabilityDistanceAtLeast": {
+        "1000m": 0.03392,
+        "2400m": 0.00051,
+        "5000m": 5e-06
+      },
+      "singleContinuouslyBurningSource50minUpperModel": 0.0003452218874437918,
+      "singleFuel08Source20minLifetime": 0.000138103058989425
+    },
+    {
+      "speedMs": 10,
+      "proposal": true,
+      "samples": 200000,
+      "nearHits": 214,
+      "nearMiradaKernelProbability": 0.00107,
+      "kernelWilson95": [
+        0.0009359795957446386,
+        0.001223186930984716
+      ],
+      "probabilityDistanceAtLeast": {
+        "1000m": 0.04257,
+        "2400m": 0.004025,
+        "5000m": 0.001045
+      },
+      "singleContinuouslyBurningSource50minUpperModel": 0.0008898537518593486,
+      "singleFuel08Source20minLifetime": 0.0003560365666295251
+    }
+  ],
+  "proposal": {
+    "description": "Analysis-only mixture: above 5 m/s, ramp long-range mass to 2% by 10 m/s; long component mean=4\u00d740V m, sigma=1.0; original component unchanged.",
+    "deployed": false,
+    "validation": "Not fitted to MIRADA. 3/6/10 m/s and 1/2.4/5 km controls audit side effects, not independent wildfire validation. Independent incident/ember observations required before deployment."
+  },
+  "limitations": [
+    "Uniform flat fuel, not the incident grid; this cannot establish MIRADA cause.",
+    "Kernel audit samples single-source ember transport; near-source trial calculation assumes susceptibility=1.04 and independence. The CA run includes front growth.",
+    "Zero hits is not zero probability; use the confidence interval. No claim of operational calibration."
+  ]
+}
