@@ -16,8 +16,8 @@ const fmt = (v: number) => (v >= 1e3 ? `$${Math.round(v / 1e3)}k` : `$${Math.rou
 const EVAL_STEPS = 96; // 8 小时（每步 5 分钟）
 const EVAL_SEEDS = [11, 23, 37, 41, 53];
 const PLANNER_FACTOR = 4; // 512² → 128²
-// Keep the planning horizon identical to the GPU comparison (currently 8 h).
-const plannerHorizonMinutes = () => EVAL_STEPS * SpreadParams.stepMinutes;
+// 规划器的到达时间已与 GPU 模拟对齐（core 的 arrivalTimeScale），预测时长与 GPU 评估相同
+const PLANNER_HORIZON_MIN = EVAL_STEPS * SpreadParams.stepMinutes;
 
 export interface PlannerDeps {
   grid: Grid;
@@ -185,8 +185,8 @@ export class PlannerController {
       ignitions,
       wind: this.d.windField(),
       budget: this.budget,
-      horizonMinutes: plannerHorizonMinutes(),
-      maxIterations: 8,
+      horizonMinutes: PLANNER_HORIZON_MIN,
+      maxIterations: 16,
       downwind: this.downwind(),
       wildlandDistanceM: 2500,
     };
@@ -216,11 +216,7 @@ export class PlannerController {
       shell.setCompareStatus(
         `Same fire for every plan: ${fromTestFire ? "your test-fire ignition" : "a likely ignition upwind of the communities"}, current wind, 8 hours, averaged over ${EVAL_SEEDS.length} runs. Planner took ${(r.ms / 1000).toFixed(1)} s.` +
           ` Differences under ${Math.round(this.noise)} homes are within run-to-run noise.` +
-          (r.diagnostics?.stopReason === "iteration-limit"
-            ? ` Greedy used ${fmt(r.greedyCost)}. Calculation limit reached; more planning may improve this result.`
-            : r.diagnostics?.stopReason === "no-beneficial-candidate"
-              ? ` Greedy used ${fmt(r.greedyCost)}. No further modeled benefit found among the candidates tested.`
-              : "") +
+          greedyNote(r, this.budget) +
           (this.rows.mincut?.overBudget ? " * Over budget: the min-cut line ignores the budget." : ""),
       );
       // 默认展示贪心方案（你还没画时），否则保持你的方案
@@ -297,6 +293,14 @@ export class PlannerController {
     }
     return out;
   }
+}
+
+/** 贪心规划器为什么停下：使用 core 返回的诊断信息 */
+function greedyNote(r: PlanResult, budget: number): string {
+  const reason = r.diagnostics?.stopReason;
+  if (reason === "budget-exhausted") return ` The greedy planner used ${fmt(r.greedyCost)} of the ${fmt(budget)} budget.`;
+  if (reason === "iteration-limit") return ` The greedy planner hit its iteration limit at ${fmt(r.greedyCost)}.`;
+  return ` The greedy planner stopped at ${fmt(r.greedyCost)}: no further treatment showed a benefit in its spread model.`;
 }
 
 /** 半径 r 格内燃料最高的植被格 */

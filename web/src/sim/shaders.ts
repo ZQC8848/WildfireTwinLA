@@ -41,6 +41,11 @@ export const stepFragment = /* glsl */ `
 ${common}
 uniform sampler2D uState;
 uniform sampler2D uGrid;  // R 高程, G 燃料, B 干燥度, A 类别
+uniform sampler2D uTreat; // 处理掩膜：R × 255 = 0 无，1 防火带，2 计划烧除，3 疏伐，4 Zone 0
+uniform float uBreakMul;  // 各处理手段对蔓延概率的倍率（来自 core 的 TreatmentEffect）
+uniform float uBurnMul;
+uniform float uThinMul;
+uniform float uZone0Mul;
 uniform sampler2D uWind;  // R 向东, G 向南（m/s）
 uniform vec2 uWindSize;
 uniform ivec2 uSize;
@@ -91,6 +96,9 @@ void main() {
   float V = length(wind);
   vec2 wdir = V > 1e-4 ? wind / V : vec2(0.0);
 
+  // 处理效果：防火带、计划烧除按燃料倍率、疏伐按蔓延速率倍率降低本格被引燃的概率；Zone 0 降低房屋的飞火易损性
+  int treat = int(texelFetch(uTreat, c, 0).r * 255.0 + 0.5);
+  float treatMul = treat == 1 ? uBreakMul : treat == 2 ? uBurnMul : treat == 3 ? uThinMul : 1.0;
   float notIgnite = 1.0;
   if (g.a < 1.5 && g.g > 0.0) {
     // 植被格：8 邻域的燃烧格独立作用
@@ -111,7 +119,7 @@ void main() {
         float slope = degrees(atan(g.r - texelFetch(uGrid, n, 0).r, dist));
         float ps = exp(uA * slope);
         // 对角邻格的概率略降，减轻方格网造成的方形火场
-        float p = clamp(base * pw * ps * (diag ? 0.83 : 1.0), 0.0, 1.0);
+        float p = clamp(base * pw * ps * (diag ? 0.83 : 1.0) * treatMul, 0.0, 1.0);
         notIgnite *= 1.0 - p;
       }
     }
@@ -120,7 +128,7 @@ void main() {
   if (uSpotting && V > 2.0) {
     // 飞火：从本格逆风回溯，看上风方向一定距离处是否有燃烧格
     float meanDist = uSpotDistPerMs * V;
-    float susceptibility = g.a > 1.5 ? 2.5 * (0.5 + g.b) : g.g * (0.5 + g.b);
+    float susceptibility = (g.a > 1.5 ? 2.5 * (0.5 + g.b) * (treat == 4 ? uZone0Mul : 1.0) : g.g * (0.5 + g.b)) * treatMul;
     for (int k = 0; k < 8; k++) {
       if (k >= uSpotSamples) break;
       float u1 = max(rand(c, uStep, uSeed, uint(10 + k * 3)), 1e-6);

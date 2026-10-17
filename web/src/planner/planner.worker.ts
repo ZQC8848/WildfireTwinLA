@@ -3,7 +3,7 @@
 // 这里需要按降采样倍率换算成本（一个粗格 = factor² 个细格）。
 
 import { createCore, downsample, remapCell, upsampleMask, treatmentMask, PlanningParams } from "@core";
-import type { Building, Grid, Treatment, WindField, PlannerDiagnostics } from "@core";
+import type { Building, Grid, PlannerDiagnostics, Treatment, WindField } from "@core";
 
 export interface PlanJob {
   id: number;
@@ -28,8 +28,9 @@ export interface PlanResult {
   mincut: Uint8Array;
   greedyCost: number;
   mincutCost: number;
-  ms: number;
+  /** 贪心规划器的停止原因等诊断信息 */
   diagnostics?: PlannerDiagnostics;
+  ms: number;
   error?: string;
 }
 
@@ -92,10 +93,11 @@ self.onmessage = (e: MessageEvent<PlanJob>) => {
     const buildings = job.buildings.map((b) => ({ ...b, cell: remapCell(b.cell, W, cw, job.factor) }));
     const core = createCore(coarse, {
       buildings,
-      spread: { referenceCellSize: job.grid.meta.cellSize },
       maxIterations: job.maxIterations,
       stripLength: 5,
       cost: (type) => PlanningParams.costPerCell[type] * f2,
+      // 让规划器的到达时间与 GPU 模拟对齐（Lucia 在合成网格上拟合的时间尺度，见 packages/core/README.md）
+      spread: { referenceCellSize: job.grid.meta.cellSize, timeScale: PlanningParams.arrivalTimeScale, spotting: true },
     });
     const ignitions = [...new Set(job.ignitions.map((c) => remapCell(c, W, cw, job.factor)))];
     const scenarios = [{ id: "current", probability: 1, wind: job.wind, ignitions, horizonMinutes: job.horizonMinutes }];

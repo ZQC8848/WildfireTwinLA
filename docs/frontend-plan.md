@@ -163,6 +163,16 @@ web/
 
 **验收**：画一条防火带后，集合预报的燃烧概率在防火带后方明显下降；三种方案可切换对比；所有交互只通过约定 3 的接口与 core 交互。
 
+> **状态：已完成**（分支 `a/p4-treatments`），实现见 `web/src/planner/`：
+> - `treatments.ts`：全分辨率处理掩膜与笔刷（防火带、计划烧除、疏伐只能画在植被上，Zone 0 只能画在房屋上），按 core 的 `PlanningParams.costPerCell` 计算成本。
+> - GPU 模拟与 CPU 参考实现读取同一张掩膜（`uTreat`）：防火带、烧除按 `fuelMul`、疏伐按 `rosMul` 降低被引燃概率，Zone 0 按 `emberMul` 降低房屋的飞火易损性。地形按手段画不同纹理（统一用阻燃剂粉红），处理区内的树被清除或疏开。
+> - `planner.worker.ts`：在 Web Worker 中把网格降采样到 128²，运行 Lucia 的贪心规划器与最小割。最小割的火源取"上风方向、离社区 2.5 km 以外的整片野地"，而不是具体点火点（否则最便宜的解只是绕点火点围一圈）。
+> - `evaluate.ts`：所有方案（无处理、你的、贪心、最小割）用同一个 GPU 模拟评估：同一点火、当前风场、8 小时、5 个随机种子取平均。差异小于随机噪声（无处理方案各次运行标准误的 2 倍）时显示 "≈ 0"，不加粗。
+> - Plan 侧栏：处理工具、笔刷大小、方案摘要；预算；"Suggest plans and compare" 与四列对比表；点击列头即在地图与模拟中切换方案。
+> - 调试 URL：`?paint=x0,y0,x1,y1,类型[,半径]`、`?suggest`。
+>
+> 已知问题（需与 Lucia 对齐）：core 规划器的蔓延速度比 GPU 模拟慢约 8 倍，所以规划器的预测时长暂取 96 小时；贪心规划器在大风下往往只用掉一小部分预算就停止。
+
 ### P5 实时数据与回放
 
 **目标**：接入后端事件流，支持 live 与 Eaton replay 两种模式。
@@ -176,6 +186,15 @@ web/
 - 模式切换：URL 参数 `?mode=live` / `?mode=replay&event=eaton`；回放模式下时间轴驱动消息时间。
 
 **验收**：在 `replay=eaton` 下从起火开始回放，火点随时间出现、模拟随之推进、社区告警依次触发。
+
+> **状态：已完成**（分支 `a/p5-realtime`），实现见 `web/src/net/` 与 `web/src/realtime/`：
+> - `net/feed.ts`：连接后端 WebSocket。live 模式断线后指数退避重连、每 20 秒 ping；replay 模式在后端不可用时改为在浏览器内播放仓库里的 `server/data/eaton-replay.jsonl`（与后端读的是同一份文件）。后端地址：`?api=` > `VITE_API_URL` > `http://localhost:8010`。
+> - `net/messages.ts`：规范化消息。风兼容旧格式 `grid5x5`（后端目前由南向北，翻转为由北向南）与新格式 `{width, height, samples}`；火点按经纬度用前端网格重新换算格子，不依赖后端的格子号。
+> - `realtime/controller.ts`：火点画成标记（`scene/hotspots.ts`）并在模拟中点火；回放时先把模拟推进到火点的观测时刻（单次最多 24 小时）。风更新来流；官方火界画成对照轮廓并计算与模拟火场的 IoU；模型告警（标注 not official）、官方疏散令、外呼状态进入事件流与外呼统计。
+> - Respond 侧栏：数据源切换（Simulation / Live feed / Eaton replay）、连接状态、火点数、官方火界面积与重合度、外呼统计；顶栏显示当前数据源。
+> - 调试 URL：`?feed=live|replay`、`?api=`。
+>
+> 数据现状：`eaton-replay.jsonl` 仍是 4 条事件的演示种子（1 个火点 + 1 组风）。Tia 的 `wildfire-eaton-replay` 可以生成 Eaton 最终官方火界，但没有带时间的火点序列；要做有说服力的回放，需要 2025-01-07/08 的 FIRMS 存档火点。
 
 ### P6 视觉与场景完整度
 
