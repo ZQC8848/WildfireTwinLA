@@ -40,6 +40,7 @@ export interface ShellHandlers {
   onBudget(dollars: number): void;
   onSuggest(): void;
   onShowPlan(key: PlanKey): void;
+  onFeed(mode: "off" | "live" | "replay"): void;
 }
 
 const fmtMoney = (v: number) => (v >= 1e6 ? `$${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `$${Math.round(v / 1e3)}k` : `$${Math.round(v)}`);
@@ -120,6 +121,14 @@ export class Shell {
         <dl class="metrics" id="plan-fire" hidden></dl>
       </section>
       <section data-mode-only="respond" class="first">
+        <h2>Data source</h2>
+        <div class="segmented feed-modes" id="feed-mode" role="group" aria-label="Data source">
+          <button data-feed="off" aria-pressed="true">Simulation</button><button data-feed="live" aria-pressed="false">Live feed</button><button data-feed="replay" aria-pressed="false">Eaton replay</button>
+        </div>
+        <p class="tool-note" id="feed-status">Test fires you place on the map. Switch to the live feed for satellite hotspots, or replay the Eaton Fire.</p>
+        <dl class="metrics" id="feed-metrics"></dl>
+      </section>
+      <section data-mode-only="respond">
         <div id="respond-empty"><h2>No active fire</h2><p>Click the map to place an ignition. Distances, arrival estimates and affected homes update as the fire spreads.</p></div>
         <div id="respond-closest" hidden>
           <h2>Closest community</h2>
@@ -135,6 +144,10 @@ export class Shell {
       <section data-mode-only="respond">
         <h2>Homes in the fire area</h2>
         <dl class="metrics" id="homes"></dl>
+      </section>
+      <section data-mode-only="respond" id="calls-section" hidden>
+        <h2>Calls to residents</h2>
+        <dl class="metrics" id="calls"></dl>
       </section>
       <section data-mode-only="respond">
         <h2>Feed</h2>
@@ -242,6 +255,10 @@ export class Shell {
       const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-plan]");
       if (b) this.handlers.onShowPlan(b.dataset.plan as PlanKey);
     });
+    this.q<HTMLDivElement>("#feed-mode").addEventListener("click", (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-feed]");
+      if (b) this.handlers.onFeed(b.dataset.feed as "off" | "live" | "replay");
+    });
     this.setBrush(3);
     this.q<HTMLInputElement>("#show-smoke").addEventListener("change", (e) => this.handlers.onShowSmoke((e.target as HTMLInputElement).checked));
 
@@ -299,7 +316,8 @@ export class Shell {
   setElapsed(minutes: number | null) {
     const text = minutes === null ? "" : `T + ${formatMinutes(minutes)}`;
     this.q<HTMLSpanElement>("#elapsed").textContent = minutes === null ? "Not started" : text;
-    this.q<HTMLSpanElement>("#clock").textContent = this.mode === "respond" && minutes !== null ? `Simulation ${text}` : "";
+    const source = this.feedLabel ? `${this.feedLabel}, ` : "";
+    this.q<HTMLSpanElement>("#clock").textContent = this.mode === "respond" && (minutes !== null || source) ? `${source}${minutes !== null ? `simulation ${text}` : "waiting"}` : "";
   }
 
   // ---- 图例 ----
@@ -397,6 +415,27 @@ export class Shell {
       `<tr><th>Cost</th>${keys.map((k) => cell(k, (r) => (r.cost ? fmtMoney(r.cost) + (r.overBudget ? "*" : "") : "–"))).join("")}</tr>`,
       `<tr><th>Homes saved per $100k</th>${keys.map((k) => cell(k, (r) => (r.withinNoise ? "≈ 0" : r.savedPer100k === null ? "–" : r.savedPer100k.toFixed(1)))).join("")}</tr>`,
     ].join("");
+  }
+
+  // ---- 数据源 ----
+  setFeed(mode: "off" | "live" | "replay", status: string, rows: [string, string][]) {
+    document.querySelectorAll<HTMLButtonElement>("#feed-mode button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.feed === mode)));
+    this.q<HTMLParagraphElement>("#feed-status").textContent =
+      mode === "off" ? "Test fires you place on the map. Switch to the live feed for satellite hotspots, or replay the Eaton Fire." : status;
+    this.q<HTMLDListElement>("#feed-metrics").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+    this.feedLabel = mode === "live" ? "Live feed" : mode === "replay" ? "Eaton replay" : "";
+  }
+
+  private feedLabel = "";
+
+  setCalls(t: { confirmed: number; noAnswer: number; needsHelp: number; other: number } | null) {
+    const total = t ? t.confirmed + t.noAnswer + t.needsHelp + t.other : 0;
+    this.q<HTMLElement>("#calls-section").hidden = !total;
+    if (!t || !total) return;
+    this.q<HTMLDListElement>("#calls").innerHTML =
+      `<dt>Confirmed</dt><dd>${t.confirmed}</dd><dt>No answer</dt><dd>${t.noAnswer}</dd>` +
+      `<dt>Needs help</dt><dd class="${t.needsHelp ? "ember" : ""}">${t.needsHelp}</dd>` +
+      (t.other ? `<dt>In progress</dt><dd>${t.other}</dd>` : "");
   }
 
   // ---- 侧栏内容 ----

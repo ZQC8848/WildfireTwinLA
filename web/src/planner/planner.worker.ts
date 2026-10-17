@@ -3,7 +3,7 @@
 // 这里需要按降采样倍率换算成本（一个粗格 = factor² 个细格）。
 
 import { createCore, downsample, remapCell, upsampleMask, treatmentMask, PlanningParams } from "@core";
-import type { Building, Grid, Treatment, WindField } from "@core";
+import type { Building, Grid, PlannerDiagnostics, Treatment, WindField } from "@core";
 
 export interface PlanJob {
   id: number;
@@ -28,6 +28,8 @@ export interface PlanResult {
   mincut: Uint8Array;
   greedyCost: number;
   mincutCost: number;
+  /** 贪心规划器的停止原因等诊断信息 */
+  diagnostics?: PlannerDiagnostics;
   ms: number;
   error?: string;
 }
@@ -94,6 +96,8 @@ self.onmessage = (e: MessageEvent<PlanJob>) => {
       maxIterations: job.maxIterations,
       stripLength: 5,
       cost: (type) => PlanningParams.costPerCell[type] * f2,
+      // 让规划器的到达时间与 GPU 模拟对齐（Lucia 在合成网格上拟合的时间尺度，见 packages/core/README.md）
+      spread: { referenceCellSize: job.grid.meta.cellSize, timeScale: PlanningParams.arrivalTimeScale, spotting: true },
     });
     const ignitions = [...new Set(job.ignitions.map((c) => remapCell(c, W, cw, job.factor)))];
     const scenarios = [{ id: "current", probability: 1, wind: job.wind, ignitions, horizonMinutes: job.horizonMinutes }];
@@ -107,6 +111,7 @@ self.onmessage = (e: MessageEvent<PlanJob>) => {
       mincut: toFine(mincut, cw * ch, cw, ch, job.factor),
       greedyCost: greedy.reduce((s, t) => s + t.cost, 0),
       mincutCost: mincut.reduce((s, t) => s + t.cost, 0),
+      diagnostics: core.getPlannerDiagnostics(),
       ms: performance.now() - t0,
     };
     (self as unknown as Worker).postMessage(result, [result.greedy.buffer, result.mincut.buffer]);

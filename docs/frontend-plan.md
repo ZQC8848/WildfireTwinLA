@@ -187,6 +187,15 @@ web/
 
 **验收**：在 `replay=eaton` 下从起火开始回放，火点随时间出现、模拟随之推进、社区告警依次触发。
 
+> **状态：已完成**（分支 `a/p5-realtime`），实现见 `web/src/net/` 与 `web/src/realtime/`：
+> - `net/feed.ts`：连接后端 WebSocket。live 模式断线后指数退避重连、每 20 秒 ping；replay 模式在后端不可用时改为在浏览器内播放仓库里的 `server/data/eaton-replay.jsonl`（与后端读的是同一份文件）。后端地址：`?api=` > `VITE_API_URL` > `http://localhost:8010`。
+> - `net/messages.ts`：规范化消息。风兼容旧格式 `grid5x5`（后端目前由南向北，翻转为由北向南）与新格式 `{width, height, samples}`；火点按经纬度用前端网格重新换算格子，不依赖后端的格子号。
+> - `realtime/controller.ts`：火点画成标记（`scene/hotspots.ts`）并在模拟中点火；回放时先把模拟推进到火点的观测时刻（单次最多 24 小时）。风更新来流；官方火界画成对照轮廓并计算与模拟火场的 IoU；模型告警（标注 not official）、官方疏散令、外呼状态进入事件流与外呼统计。
+> - Respond 侧栏：数据源切换（Simulation / Live feed / Eaton replay）、连接状态、火点数、官方火界面积与重合度、外呼统计；顶栏显示当前数据源。
+> - 调试 URL：`?feed=live|replay`、`?api=`。
+>
+> 数据现状：`eaton-replay.jsonl` 仍是 4 条事件的演示种子（1 个火点 + 1 组风）。Tia 的 `wildfire-eaton-replay` 可以生成 Eaton 最终官方火界，但没有带时间的火点序列；要做有说服力的回放，需要 2025-01-07/08 的 FIRMS 存档火点。
+
 ### P6 视觉与场景完整度
 
 **目标**：把场景做到可以直接用于 demo 和 pitch。

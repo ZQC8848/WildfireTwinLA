@@ -2,7 +2,7 @@
 // 显示中的方案同时就是火势模拟使用的处理掩膜，所以选中某一列后点火，看到的就是该方案下的火。
 
 import * as THREE from "three";
-import { CellClass, GRID_CHANNELS, type Building, type Grid, type Wind, type WindField } from "@core";
+import { CellClass, GRID_CHANNELS, SpreadParams, type Building, type Grid, type Wind, type WindField } from "@core";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { TerrainPicker } from "../interact/picking";
 import type { FireSim } from "../sim/fireSim";
@@ -16,9 +16,8 @@ const fmt = (v: number) => (v >= 1e3 ? `$${Math.round(v / 1e3)}k` : `$${Math.rou
 const EVAL_STEPS = 96; // 8 小时（每步 5 分钟）
 const EVAL_SEEDS = [11, 23, 37, 41, 53];
 const PLANNER_FACTOR = 4; // 512² → 128²
-// Lucia 的规划器与 GPU 模拟的蔓延速度尚未统一标定（规划器约慢 8 倍），
-// 预测时长取得足够长，让规划器能"看到"社区受威胁；方案的好坏统一用 GPU 模拟评估
-const PLANNER_HORIZON_MIN = 5760;
+// 规划器的到达时间已与 GPU 模拟对齐（core 的 arrivalTimeScale），预测时长与 GPU 评估相同
+const PLANNER_HORIZON_MIN = EVAL_STEPS * SpreadParams.stepMinutes;
 
 export interface PlannerDeps {
   grid: Grid;
@@ -187,7 +186,7 @@ export class PlannerController {
       wind: this.d.windField(),
       budget: this.budget,
       horizonMinutes: PLANNER_HORIZON_MIN,
-      maxIterations: 8,
+      maxIterations: 16,
       downwind: this.downwind(),
       wildlandDistanceM: 2500,
     };
@@ -217,7 +216,7 @@ export class PlannerController {
       shell.setCompareStatus(
         `Same fire for every plan: ${fromTestFire ? "your test-fire ignition" : "a likely ignition upwind of the communities"}, current wind, 8 hours, averaged over ${EVAL_SEEDS.length} runs. Planner took ${(r.ms / 1000).toFixed(1)} s.` +
           ` Differences under ${Math.round(this.noise)} homes are within run-to-run noise.` +
-          (r.greedyCost < this.budget * 0.5 ? ` The greedy planner stopped at ${fmt(r.greedyCost)} because further strips showed no benefit in its spread model.` : "") +
+          greedyNote(r, this.budget) +
           (this.rows.mincut?.overBudget ? " * Over budget: the min-cut line ignores the budget." : ""),
       );
       // 默认展示贪心方案（你还没画时），否则保持你的方案
@@ -294,6 +293,14 @@ export class PlannerController {
     }
     return out;
   }
+}
+
+/** 贪心规划器为什么停下：使用 core 返回的诊断信息 */
+function greedyNote(r: PlanResult, budget: number): string {
+  const reason = r.diagnostics?.stopReason;
+  if (reason === "budget-exhausted") return ` The greedy planner used ${fmt(r.greedyCost)} of the ${fmt(budget)} budget.`;
+  if (reason === "iteration-limit") return ` The greedy planner hit its iteration limit at ${fmt(r.greedyCost)}.`;
+  return ` The greedy planner stopped at ${fmt(r.greedyCost)}: no further treatment showed a benefit in its spread model.`;
 }
 
 /** 半径 r 格内燃料最高的植被格 */
