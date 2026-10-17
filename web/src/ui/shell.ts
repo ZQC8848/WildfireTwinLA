@@ -33,6 +33,8 @@ export interface ShellHandlers {
   onWindModel(model: "terrain" | "uniform"): void;
   onLayer(layer: LayerId): void;
   onShowWind(show: boolean): void;
+  onForecast(): void;
+  onShowForecast(show: boolean): void;
   onShowSmoke(show: boolean): void;
   onTool(tool: Tool | null): void;
   onBrush(radiusCells: number): void;
@@ -144,6 +146,14 @@ export class Shell {
           <div class="closest-figure" id="closest-figure"></div>
           <div class="closest-note" id="closest-note"></div>
         </div>
+      </section>
+      <section data-mode-only="respond" id="forecast-section">
+        <h2>Forecast, next 8 hours</h2>
+        <button class="btn btn-block" id="forecast-run" disabled>Run 64-run forecast</button>
+        <label class="map-card-row forecast-show"><input type="checkbox" id="forecast-show" checked /> Show on map</label>
+        <p class="tool-note" id="forecast-status">64 fire simulations from the current fire, each with the wind direction varied up to ±15° and the speed up to ±20%.</p>
+        <table class="compare" id="forecast-table" hidden></table>
+        <p class="tool-note" id="forecast-legend" hidden>Shading: chance of burning. Lines: median arrival, one per hour. Chance is the share of runs in which the fire reaches the community.</p>
       </section>
       <section data-mode-only="respond">
         <h2>Communities</h2>
@@ -295,6 +305,8 @@ export class Shell {
     this.q<HTMLButtonElement>("#now").addEventListener("click", () => this.handlers.onNow());
     this.setBrush(3);
     this.q<HTMLInputElement>("#show-smoke").addEventListener("change", (e) => this.handlers.onShowSmoke((e.target as HTMLInputElement).checked));
+    this.q<HTMLButtonElement>("#forecast-run").addEventListener("click", () => this.handlers.onForecast());
+    this.q<HTMLInputElement>("#forecast-show").addEventListener("change", (e) => this.handlers.onShowForecast((e.target as HTMLInputElement).checked));
 
     this.setSpeed(opts.stepsPerSecond);
     this.setWind(opts.windDir, opts.windSpeed);
@@ -473,6 +485,25 @@ export class Shell {
       `<tr><th>Cost</th>${keys.map((k) => cell(k, (r) => (r.cost ? fmtMoney(r.cost) + (r.overBudget ? "*" : "") : "–"))).join("")}</tr>`,
       `<tr><th>Homes saved per $100k</th>${keys.map((k) => cell(k, (r) => (r.withinNoise ? "≈ 0" : r.savedPer100k === null ? "–" : r.savedPer100k.toFixed(1)))).join("")}</tr>`,
     ].join("");
+  }
+
+  // ---- 集合预报 ----
+  setForecast(available: boolean, status: string | null, rows: { name: string; probability: number; medianMin: number | null; earlyMin: number | null }[] | null) {
+    this.q<HTMLButtonElement>("#forecast-run").disabled = !available;
+    if (status) this.q<HTMLParagraphElement>("#forecast-status").textContent = status;
+    const table = this.q<HTMLTableElement>("#forecast-table");
+    table.hidden = !rows;
+    this.q<HTMLParagraphElement>("#forecast-legend").hidden = !rows;
+    if (!rows) return;
+    const t = (m: number | null) => (m === null ? "–" : formatMinutes(m));
+    const pct = (p: number) => (p > 0 && p < 0.02 ? "< 2%" : `${Math.round(p * 100)}%`);
+    table.innerHTML =
+      `<thead><tr><th></th><th>Chance</th><th>Median</th><th>Earliest</th></tr></thead><tbody>` +
+      [...rows]
+        .sort((a, b) => b.probability - a.probability)
+        .map((r) => `<tr><th>${esc(r.name)}</th><td class="${r.probability >= 0.5 ? "ember" : ""}">${pct(r.probability)}</td><td>${t(r.medianMin)}</td><td>${t(r.earlyMin)}</td></tr>`)
+        .join("") +
+      "</tbody>";
   }
 
   // ---- 数据源 ----

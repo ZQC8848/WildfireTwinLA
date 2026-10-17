@@ -872,3 +872,11 @@ body.painting #app canvas {
   opacity: 0.4;
   cursor: default;
 }
+
+.compare td.ember {
+  color: var(--ember);
+}
+
+.forecast-show {
+  margin-top: 8px;
+}
