@@ -37,6 +37,7 @@ export interface ShellHandlers {
   onShowAlerts(show: boolean): void;
   onShowMarkers(show: boolean): void;
   onCameraMode(mode: "orbit" | "fly"): void;
+  onNorth(): void;
   onShowForecast(show: boolean): void;
   onShowSmoke(show: boolean): void;
   onTool(tool: Tool | null): void;
@@ -65,6 +66,36 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string,
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
   if (html) e.innerHTML = html;
   return e;
+}
+
+// 工具条图标：16px，线条用 currentColor，按下时随文字变成 Retardant 粉红
+const svg = (body: string) => `<svg class="tool-icon" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+const TOOL_ICONS = {
+  overview: svg(`<path d="M1.5 4.5 6 2.5l4 2 4.5-2v9L10 13.5l-4-2-4.5 2z"/><path d="M6 2.5v9M10 4.5v9"/>`),
+  fire: svg(`<path d="M8.6 1.5c.4 2.2-1 3.3-2 4.5C5.6 7.1 4.8 8.2 4.8 9.9a3.2 3.2 0 0 0 6.4 0c0-1.3-.6-2.2-1.1-2.8.1 1-.3 1.8-.9 2.1.3-1.9-.2-3.2-.6-4.1.8-.8 1.1-2.1 0-3.6z"/>`),
+  community: svg(`<path d="M2 7.5 8 2.5l6 5"/><path d="M3.5 6.5v7h9v-7"/><path d="M6.5 13.5v-4h3v4"/>`),
+  wind: svg(`<path d="M1.5 5.5h8.5a2 2 0 1 0-2-2"/><path d="M1.5 8.5h11a2 2 0 1 1-2 2"/><path d="M1.5 11.5h5"/>`),
+  smoke: svg(`<path d="M4.5 12.5h7a3 3 0 0 0 .3-6 4 4 0 0 0-7.6-.8 3.4 3.4 0 0 0 .3 6.8z"/>`),
+  alerts: svg(`<path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/><path d="M8 5.5v2.2"/><path d="M8 9.3v.01"/>`),
+  markers: svg(`<path d="M4 14V6M8 14V2M12 14V8"/>`),
+  chevron: svg(`<path d="M4 6l4 4 4-4"/>`),
+};
+
+/** 每位访客自己的界面偏好（图例折叠等），读写失败时用默认值 */
+function readPref(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(`wildfiretwin.${key}`);
+    return v === null ? fallback : v === "1";
+  } catch {
+    return fallback;
+  }
+}
+function writePref(key: string, value: boolean) {
+  try {
+    localStorage.setItem(`wildfiretwin.${key}`, value ? "1" : "0");
+  } catch {
+    /* 隐私模式等情况下忽略 */
+  }
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
@@ -212,38 +243,50 @@ export class Shell {
 
     // ---- 地图浮层 ----
     const hover = el("div", { class: "hover-tag", id: "hover-tag", hidden: "" });
-    const corner = el("div", { class: "map-corner" });
-    const layerOptions = (Object.keys(LAYERS) as LayerId[]).map((id) => `<option value="${id}">${LAYERS[id].label}</option>`).join("");
-    corner.innerHTML = `
-      <div class="map-card view-card">
-        <div class="segmented view-presets" id="view-presets" role="group" aria-label="Camera view">
-          <button data-view="overview" title="Overview (1)">Overview</button><button data-view="fire" title="Fire front (2)">Fire front</button><button data-view="community" title="Closest community (3)">Community</button>
-        </div>
-        <div class="segmented camera-mode" id="camera-mode" role="group" aria-label="Camera controls">
-          <button data-cam="orbit" aria-pressed="true" title="Drag to orbit, scroll to zoom">Orbit</button><button data-cam="fly" aria-pressed="false" title="Unity-style fly camera">Fly (WASD)</button>
-        </div>
-        <p class="tool-note fly-hint" id="fly-hint" hidden>Right-drag to look. W A S D to move, Q / E down and up, Shift for speed. Scroll to move forward; right-drag and scroll to change speed (<span id="fly-speed">×1.0</span>).</p>
-      </div>
-      <div class="map-card" id="layer-card">
-        <div class="map-card-row"><label for="layer">Map layer</label><select class="select" id="layer">${layerOptions}</select></div>
-      </div>
-      <div class="map-card" id="legend"></div>
-      <div class="map-card wind-rose">
+    // 右侧工具条（导航与显示开关，图标 + 文字）；右下角可折叠的图层与图例；左下角数据署名；底部居中的一次性提示
+    const tools = el("div", { class: "map-tools", role: "toolbar", "aria-label": "Map controls" });
+    tools.innerHTML = `
+      <button class="compass" id="compass" title="Click to face north">
         <svg viewBox="-24 -24 48 48" aria-hidden="true">
-          <circle r="21" fill="none" stroke="currentColor" stroke-opacity="0.25" />
-          <text y="-13" text-anchor="middle" font-size="8" fill="currentColor" fill-opacity="0.7">N</text>
-          <g id="rose-arrow"><path d="M0,-14 L0,12 M-5,6 L0,13 L5,6" fill="none" stroke="#6F9DBF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></g>
+          <g id="compass-dial">
+            <circle r="21" fill="none" stroke="currentColor" stroke-opacity="0.25" />
+            <path d="M0,-21 L0,-16 M21,0 L16,0 M0,21 L0,16 M-21,0 L-16,0" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5" />
+            <text y="-9" text-anchor="middle" font-size="9" font-weight="600" fill="currentColor">N</text>
+          </g>
+          <g id="compass-wind"><path d="M0,-14 L0,12 M-5,6 L0,13 L5,6" fill="none" stroke="#6F9DBF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></g>
         </svg>
-        <div>
-          <div id="rose-label" class="figure"></div>
-          <label class="map-card-row"><input type="checkbox" id="show-wind" /> Show wind arrows</label>
-          <label class="map-card-row"><input type="checkbox" id="show-smoke" checked /> Show smoke</label>
-          <label class="map-card-row" title="Shortcut: H"><input type="checkbox" id="show-alerts" checked /> Show home alerts <span class="alerts-count" id="alerts-count" hidden></span></label>
-          <label class="map-card-row"><input type="checkbox" id="show-markers" checked /> Show satellite markers</label>
+        <span><span class="compass-label" id="compass-label"></span><span class="compass-sub">Face north</span></span>
+      </button>
+      <div class="tool-group" id="view-presets" role="group" aria-label="Camera view">
+        <button class="tool-btn" data-view="overview">${TOOL_ICONS.overview}<span>Overview</span><kbd>1</kbd></button>
+        <button class="tool-btn" data-view="fire">${TOOL_ICONS.fire}<span>Fire front</span><kbd>2</kbd></button>
+        <button class="tool-btn" data-view="community">${TOOL_ICONS.community}<span>Community</span><kbd>3</kbd></button>
+      </div>
+      <div class="tool-group">
+        <div class="segmented camera-mode" id="camera-mode" role="group" aria-label="Camera controls">
+          <button data-cam="orbit" aria-pressed="true" title="Drag to orbit, scroll to zoom">Orbit</button><button data-cam="fly" aria-pressed="false" title="Right-drag to look, W A S D to move, Q / E down and up">Fly (WASD)</button>
         </div>
+      </div>
+      <div class="tool-group" role="group" aria-label="Show on map">
+        <button class="tool-btn toggle" id="show-wind" aria-pressed="false">${TOOL_ICONS.wind}<span>Wind arrows</span></button>
+        <button class="tool-btn toggle" id="show-smoke" aria-pressed="true">${TOOL_ICONS.smoke}<span>Smoke</span></button>
+        <button class="tool-btn toggle" id="show-alerts" aria-pressed="true" title="Shortcut: H">${TOOL_ICONS.alerts}<span>Home alerts</span><span class="tool-badge" id="alerts-count" hidden></span><kbd>H</kbd></button>
+        <button class="tool-btn toggle" id="show-markers" aria-pressed="true">${TOOL_ICONS.markers}<span>Satellite hotspots</span></button>
       </div>`;
+    const layerOptions = (Object.keys(LAYERS) as LayerId[]).map((id) => `<option value="${id}">${LAYERS[id].label}</option>`).join("");
+    const corner = el("div", { class: "map-legend", id: "map-legend" });
+    corner.innerHTML = `
+      <div class="legend-head">
+        <select class="select" id="layer" aria-label="Map layer">${layerOptions}</select>
+        <span class="legend-static" id="legend-static" hidden>Natural</span>
+        <button class="legend-toggle" id="legend-toggle" aria-expanded="true" aria-controls="legend" title="Collapse legend">${TOOL_ICONS.chevron}</button>
+      </div>
+      <div class="legend-body" id="legend"></div>`;
+    const attribution = el("div", { class: "map-attrib", id: "map-attrib" });
+    const toast = el("div", { class: "map-toast", id: "map-toast", role: "status", hidden: "" });
+    toast.innerHTML = `<span id="map-toast-text"></span><button id="map-toast-close" aria-label="Dismiss">×</button>`;
 
-    document.body.append(top, rail, bottom, hover, corner);
+    document.body.append(top, rail, bottom, hover, tools, corner, attribution, toast);
 
     // ---- 事件 ----
     this.q<HTMLButtonElement>("#run").addEventListener("click", () => this.handlers.onRunToggle());
@@ -270,7 +313,22 @@ export class Shell {
       this.showLegend(layer.value as LayerId);
       this.handlers.onLayer(layer.value as LayerId);
     });
-    this.q<HTMLInputElement>("#show-wind").addEventListener("change", (e) => this.handlers.onShowWind((e.target as HTMLInputElement).checked));
+    // 显示开关：按钮的 aria-pressed 表示开 / 关
+    const toggle = (id: string, fn: (on: boolean) => void) => {
+      const b = this.q<HTMLButtonElement>(id);
+      b.addEventListener("click", () => {
+        const on = b.getAttribute("aria-pressed") !== "true";
+        b.setAttribute("aria-pressed", String(on));
+        fn(on);
+      });
+    };
+    toggle("#show-wind", (on) => this.handlers.onShowWind(on));
+    toggle("#show-smoke", (on) => this.handlers.onShowSmoke(on));
+    toggle("#show-alerts", (on) => this.handlers.onShowAlerts(on));
+    toggle("#show-markers", (on) => this.handlers.onShowMarkers(on));
+    this.q<HTMLButtonElement>("#compass").addEventListener("click", () => this.handlers.onNorth());
+    this.q<HTMLButtonElement>("#legend-toggle").addEventListener("click", () => this.setLegendOpen(!this.legendOpen, true));
+    this.q<HTMLButtonElement>("#map-toast-close").addEventListener("click", () => (this.q<HTMLDivElement>("#map-toast").hidden = true));
     this.q<HTMLDivElement>("#tools").addEventListener("click", (e) => {
       const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-tool]");
       if (!b) return;
@@ -309,19 +367,12 @@ export class Shell {
       const view = ({ "1": "overview", "2": "fire", "3": "community" } as Record<string, ViewPreset>)[e.key];
       if (view) this.handlers.onView(view);
       // H：开关房屋冒泡提示
-      if (e.key === "h" || e.key === "H") {
-        const box = this.q<HTMLInputElement>("#show-alerts");
-        box.checked = !box.checked;
-        this.handlers.onShowAlerts(box.checked);
-      }
+      if (e.key === "h" || e.key === "H") this.q<HTMLButtonElement>("#show-alerts").click();
     });
     const timeline = this.q<HTMLInputElement>("#timeline");
     timeline.addEventListener("input", () => this.handlers.onScrub(Number(timeline.value)));
     this.q<HTMLButtonElement>("#now").addEventListener("click", () => this.handlers.onNow());
     this.setBrush(3);
-    this.q<HTMLInputElement>("#show-smoke").addEventListener("change", (e) => this.handlers.onShowSmoke((e.target as HTMLInputElement).checked));
-    this.q<HTMLInputElement>("#show-alerts").addEventListener("change", (e) => this.handlers.onShowAlerts((e.target as HTMLInputElement).checked));
-    this.q<HTMLInputElement>("#show-markers").addEventListener("change", (e) => this.handlers.onShowMarkers((e.target as HTMLInputElement).checked));
     this.q<HTMLDivElement>("#camera-mode").addEventListener("click", (e) => {
       const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-cam]");
       if (!b) return;
@@ -344,15 +395,18 @@ export class Shell {
     this.mode = mode;
     document.body.dataset.mode = mode;
     document.querySelectorAll<HTMLButtonElement>(".mode-switch button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.mode === mode)));
-    // 图层切换只属于规划工作；Respond 下固定显示自然色地表
-    this.q<HTMLDivElement>("#layer-card").hidden = mode === "respond";
-    this.q<HTMLDivElement>("#legend").hidden = mode === "respond";
+    // 图层切换只属于规划工作；Respond 下固定显示自然色地表，图例只读、默认折叠
+    const select = this.q<HTMLSelectElement>("#layer");
+    select.hidden = mode === "respond";
+    this.q<HTMLSpanElement>("#legend-static").hidden = mode !== "respond";
+    this.showLegend(mode === "respond" ? "natural" : (select.value as LayerId));
+    this.setLegendOpen(readPref(`legend.${mode}`, mode === "plan"), false);
   }
 
   // ---- 底栏 ----
   /** 没有火时禁用"火头"视角 */
   setViewAvailable(fire: boolean) {
-    const b = this.q<HTMLButtonElement>('#view-presets button[data-view="fire"]');
+    const b = this.q<HTMLButtonElement>('#view-presets [data-view="fire"]');
     b.disabled = !fire;
   }
 
@@ -378,9 +432,9 @@ export class Shell {
     dir.value = String(Math.round((((dirFromDeg % 360) + 360) % 360) / 22.5) * 22.5 % 360);
     this.q<HTMLInputElement>("#wind-speed").value = String(speedMs);
     this.q<HTMLSpanElement>("#wind-speed-label").textContent = `${speedMs} m/s`;
-    // 风玫瑰的箭头指向风的去向
-    this.q<SVGGElement>("#rose-arrow").setAttribute("transform", `rotate(${dirFromDeg})`);
-    this.q<HTMLDivElement>("#rose-label").textContent = `${compassName(dirFromDeg)} wind, ${speedMs} m/s`;
+    this.windFrom = dirFromDeg;
+    this.q<HTMLSpanElement>("#compass-label").textContent = `${compassName(dirFromDeg)} wind, ${speedMs} m/s`;
+    this.drawCompass();
   }
 
   setWindModel(model: "terrain" | "uniform") {
@@ -425,8 +479,7 @@ export class Shell {
     } else if (def.swatches) {
       body = def.swatches.map((s) => `<div class="swatch"><i style="background:${s.color}"></i>${s.label}</div>`).join("");
     }
-    const note = def.note ? `<div class="legend-note">${esc(def.note)}</div>` : "";
-    this.q<HTMLDivElement>("#legend").innerHTML = `<div class="legend-title">${def.label}</div>${body}${note}`;
+    this.q<HTMLDivElement>("#legend").innerHTML = body;
   }
 
   // ---- 悬停信息 ----
@@ -516,18 +569,68 @@ export class Shell {
     this.q<HTMLDivElement>("#camera-mode")
       .querySelectorAll<HTMLButtonElement>("button")
       .forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.cam === mode)));
-    this.q<HTMLParagraphElement>("#fly-hint").hidden = mode !== "fly";
+    if (mode === "fly")
+      this.toast("Fly camera: right-drag to look, W A S D to move, Q / E down and up, Shift for speed. Scroll moves forward; right-drag and scroll changes speed.", 6000);
   }
 
   setFlySpeed(scale: number) {
-    this.q<HTMLSpanElement>("#fly-speed").textContent = `×${scale.toFixed(1)}`;
+    this.toast(`Fly speed ×${scale.toFixed(1)}`, 1200);
   }
 
-  /** 冒泡数量达到上限时显示"显示了多少 / 共多少" */
+  /** 冒泡数量达到上限时在按钮上显示"显示了多少 / 共多少" */
   setAlertCount(shown: number, total: number) {
     const el = this.q<HTMLSpanElement>("#alerts-count");
     el.hidden = total <= shown;
-    el.textContent = `(${shown} of ${total})`;
+    el.textContent = `${shown}/${total}`;
+    el.title = `Showing ${shown} of ${total} alert bubbles`;
+  }
+
+  // ---- 指南针：随相机朝向旋转，风箭头始终表示真实风向 ----
+  private heading = 0;
+  private windFrom = 0;
+
+  /** 相机朝向（度，0 为正北，顺时针） */
+  setHeading(deg: number) {
+    if (Math.abs(((deg - this.heading + 540) % 360) - 180) < 0.5) return;
+    this.heading = deg;
+    this.drawCompass();
+  }
+
+  private drawCompass() {
+    this.q<SVGGElement>("#compass-dial").setAttribute("transform", `rotate(${(-this.heading).toFixed(1)})`);
+    // 箭头指向风的去向：真实风向减去相机朝向
+    this.q<SVGGElement>("#compass-wind").setAttribute("transform", `rotate(${(this.windFrom - this.heading).toFixed(1)})`);
+  }
+
+  // ---- 图例折叠：两种模式各自记住上次的选择 ----
+  private legendOpen = true;
+
+  private setLegendOpen(open: boolean, remember: boolean) {
+    this.legendOpen = open;
+    const t = this.q<HTMLButtonElement>("#legend-toggle");
+    t.setAttribute("aria-expanded", String(open));
+    t.title = open ? "Collapse legend" : "Expand legend";
+    this.q<HTMLDivElement>("#map-legend").classList.toggle("collapsed", !open);
+    if (remember) writePref(`legend.${this.mode}`, open);
+  }
+
+  // ---- 地图左下角的数据署名 ----
+  setAttribution(text: string) {
+    const a = this.q<HTMLDivElement>("#map-attrib");
+    a.textContent = text;
+    a.title = text;
+    a.hidden = !text;
+  }
+
+  // ---- 底部居中的一次性提示 ----
+  private toastTimer = 0;
+
+  toast(text: string, ms = 4000) {
+    const t = this.q<HTMLDivElement>("#map-toast");
+    this.q<HTMLSpanElement>("#map-toast-text").textContent = text;
+    t.hidden = false;
+    clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => (t.hidden = true), ms);
   }
 
   /** 有报告受损区域数据时在图例里加一项 */

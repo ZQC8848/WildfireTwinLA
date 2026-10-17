@@ -71,10 +71,14 @@ if (groups) {
     { label: "Streets and dirt roads", color: "#b3ada1" },
     { label: "Water", color: "#3f5f6a" },
   ];
-  // Copernicus 数据使用条款要求注明出处
-  LAYERS.natural.note =
-    "Fuels: LANDFIRE FBFM40, fall 2026. Image: modified Copernicus Sentinel-2 data, Oct 14, 2026. Roads: © OpenStreetMap contributors.";
 }
+// 数据署名（地图左下角）：Copernicus 与 OpenStreetMap 的使用条款要求注明出处
+const ATTRIBUTION = {
+  fuels: "Fuels: LANDFIRE",
+  image: "Imagery: modified Copernicus Sentinel-2 data (2026)",
+  roads: "Map data: © OpenStreetMap contributors",
+};
+let attribution = groups ? [ATTRIBUTION.fuels, ATTRIBUTION.image, ATTRIBUTION.roads] : [];
 ctx.scene.add(terrain.mesh);
 
 // 建成区配色。默认 hybrid：城区用与网格对齐的 Sentinel-2 真彩色底图（data/satellite.jpg），
@@ -91,7 +95,13 @@ if (bundle.source === "real" && (paletteQ === "satellite" || paletteQ === "hybri
     () => {
       console.info("[main] No satellite.jpg; using synthetic natural colors");
       terrain.uniforms.uDevPalette.value = 0;
-      LAYERS.natural.note = undefined;
+      attribution = attribution.filter((a) => a !== ATTRIBUTION.image);
+      // 失败可能发生在界面创建之前（模块仍在等待资源）；那时下面创建界面后会用更新过的署名
+      try {
+        shell.setAttribution(attribution.join(". "));
+      } catch {
+        /* shell 尚未创建 */
+      }
     },
   );
 }
@@ -310,6 +320,20 @@ const shell = new Shell(
     onShowAlerts: (show) => homeAlerts.setVisible(show),
     onShowMarkers: (show) => (markers.object.visible = show),
     onCameraMode: (mode) => fly.setEnabled(mode === "fly"),
+    onNorth: () => {
+      // 转到正北：轨道模式绕旋转中心转到目标的正南方；飞行模式原地转向北方
+      const cam = ctx.camera.position;
+      if (fly.enabled) {
+        const dir = ctx.camera.getWorldDirection(new THREE.Vector3());
+        ctx.controls.target.copy(cam).addScaledVector(dir, 500);
+        const flat = Math.hypot(dir.x, dir.z);
+        rig.flyTo(cam.clone(), cam.clone().add(new THREE.Vector3(0, dir.y * 500, -flat * 500)));
+        return;
+      }
+      const t = ctx.controls.target;
+      const off = cam.clone().sub(t);
+      rig.flyTo(t.clone().add(new THREE.Vector3(0, off.y, Math.hypot(off.x, off.z))), t.clone());
+    },
     onShowForecast: (show) => {
       forecastShown = show;
       showForecast();
@@ -329,6 +353,12 @@ const shell = new Shell(
   },
 );
 shell.setDamageLegend(damageCells.length > 0);
+shell.setAttribution(attribution.join(". "));
+// 指南针跟随相机朝向（0 为正北，顺时针）
+ctx.onFrame(() => {
+  const d = ctx.camera.getWorldDirection(new THREE.Vector3());
+  if (Math.hypot(d.x, d.z) > 1e-3) shell.setHeading((Math.atan2(d.x, -d.z) * 180) / Math.PI);
+});
 // 画布尺寸由 shell 的布局决定（侧栏、顶栏、底栏之外的区域）
 window.dispatchEvent(new Event("resize"));
 
