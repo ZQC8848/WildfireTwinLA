@@ -68,12 +68,12 @@ export class HotspotMarkers {
       const report = h.source === "REPORT";
       const height = report ? 900 : 120 + Math.min(600, h.frp * 8);
       this.dummy.position.set((x - (W - 1) / 2) * S, ground, (y - (H - 1) / 2) * S);
-      this.dummy.scale.set(report ? 22 : 14, height, report ? 22 : 14);
+      this.dummy.scale.set(report ? 18 : 14, height, report ? 18 : 14);
       this.dummy.updateMatrix();
       this.object.setMatrixAt(i, this.dummy.matrix);
-      // 颜色乘以 2.5，亮度超过 1，经 Bloom 发光
+      // 卫星火点颜色乘以 2.5，亮度超过 1，经 Bloom 发光；报告起火点保持在 1 以下，不发光，只靠白色和粗细区分
       const hex = this.missed.has(h.id) ? MISSED : SOURCE_COLORS[h.source] ?? SOURCE_COLORS.VIIRS;
-      this.object.setColorAt(i, this.color.set(hex).multiplyScalar(report ? 1.4 : 2.5));
+      this.object.setColorAt(i, this.color.set(hex).multiplyScalar(report ? 0.9 : 2.5));
     });
     this.object.count = this.items.length;
     this.object.instanceMatrix.needsUpdate = true;

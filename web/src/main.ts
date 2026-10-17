@@ -402,7 +402,8 @@ ctx.onFrame(() => {
 let downAt: [number, number] | null = null;
 ctx.renderer.domElement.addEventListener("pointerdown", (e) => (downAt = [e.clientX, e.clientY]));
 ctx.renderer.domElement.addEventListener("pointerup", (e) => {
-  if (!downAt || planner.isPainting) return;
+  // 点火只在 Plan 模式下可用；Respond 模式的火只来自实时数据或回放
+  if (!downAt || planner.isPainting || shell.mode === "respond") return;
   const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
   downAt = null;
   if (moved > 4) return;

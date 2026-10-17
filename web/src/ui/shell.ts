@@ -132,12 +132,12 @@ export class Shell {
         <div class="segmented feed-modes" id="feed-mode" role="group" aria-label="Data source">
           <button data-feed="off" aria-pressed="true">Simulation</button><button data-feed="live" aria-pressed="false">Live feed</button><button data-feed="replay" aria-pressed="false">Norte replay</button>
         </div>
-        <p class="tool-note" id="feed-status">Test fires you place on the map. Switch to the live feed for satellite hotspots, or replay the Norte Fire of Oct 16, 2026.</p>
+        <p class="tool-note" id="feed-status">Shows the test fire from Plan mode. Switch to the live feed for satellite hotspots, or replay the Norte Fire of Oct 16, 2026.</p>
         <dl class="metrics" id="feed-metrics"></dl>
         <p class="tool-note feed-legend" id="feed-legend" hidden><i class="sw sw-sat"></i>Satellite hotspot <i class="sw sw-miss"></i>Model had not reached it <i class="sw sw-report"></i>Reported ignition</p>
       </section>
       <section data-mode-only="respond">
-        <div id="respond-empty"><h2>No active fire</h2><p>Click the map to place an ignition. Distances, arrival estimates and affected homes update as the fire spreads.</p></div>
+        <div id="respond-empty"><h2>No active fire</h2><p>Start the Norte replay or the live feed above, or place a test fire in Plan mode. Distances, arrival estimates and affected homes update as the fire spreads.</p></div>
         <div id="respond-closest" hidden>
           <h2>Closest community</h2>
           <div class="closest-name" id="closest-name"></div>
@@ -479,7 +479,7 @@ export class Shell {
   setFeed(mode: "off" | "live" | "replay", status: string, rows: [string, string][], bundled = false) {
     document.querySelectorAll<HTMLButtonElement>("#feed-mode button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.feed === mode)));
     const notes: Record<typeof mode, string> = {
-      off: "Test fires you place on the map. Switch to the live feed for satellite hotspots, or replay the Norte Fire of Oct 16, 2026.",
+      off: "Shows the test fire from Plan mode. Switch to the live feed for satellite hotspots, or replay the Norte Fire of Oct 16, 2026.",
       live: status,
       replay:
         `${status} After-the-fact replay of the Norte Fire from public data (NIFC incident records, NASA FIRMS, NOAA HRRR wind). Not an official product.` +

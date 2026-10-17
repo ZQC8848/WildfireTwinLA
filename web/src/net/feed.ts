@@ -137,7 +137,7 @@ export class FeedClient {
   private playLocal(gen: number) {
     const { events, bundled } = localReplay();
     this.local = { bundled };
-    this.setState("local", bundled ? "Playing the replay built from archived public data (backend replay not available)" : "Server unavailable; playing the bundled replay");
+    this.setState("local", bundled ? "Playing the replay built from archived public data (backend replay not available)." : "Server unavailable; playing the bundled replay.");
     const lines = [...events].sort((a, b) => (a.offsetSeconds ?? 0) - (b.offsetSeconds ?? 0));
     let last = 0;
     for (const raw of lines) {
