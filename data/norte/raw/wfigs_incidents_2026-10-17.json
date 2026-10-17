@@ -1,0 +1,24 @@
+[
+ {
+  "IncidentName": "MIRADA",
+  "IncidentSize": null,
+  "PercentContained": null,
+  "FireDiscoveryDateTime": 1792178394000,
+  "InitialLatitude": 33.476987,
+  "InitialLongitude": -117.661362,
+  "FireCause": "Undetermined",
+  "POOCounty": "Orange",
+  "ModifiedOnDateTime_dt": 1792179366110
+ },
+ {
+  "IncidentName": "NORTE",
+  "IncidentSize": 465,
+  "PercentContained": 0,
+  "FireDiscoveryDateTime": 1792175576000,
+  "InitialLatitude": 33.479656,
+  "InitialLongitude": -117.634842,
+  "FireCause": "Undetermined",
+  "POOCounty": "Orange",
+  "ModifiedOnDateTime_dt": 1792207846047
+ }
+]
