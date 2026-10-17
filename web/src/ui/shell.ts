@@ -5,6 +5,21 @@ import "./tokens.css";
 import "./shell.css";
 import { LAYERS, type LayerId } from "../scene/layers";
 import { formatDistance, formatMinutes, type CommunityStatus, type FireEvent } from "../sim/fireMonitor";
+import { TREATMENT_LABELS, TREATMENT_NOTES, TREATMENT_TYPES, type Tool } from "../planner/treatments";
+
+export type PlanKey = "none" | "yours" | "greedy" | "mincut";
+export const PLAN_LABELS: Record<PlanKey, string> = { none: "None", yours: "Yours", greedy: "Greedy", mincut: "Min-cut" };
+
+export interface PlanRow {
+  homes: number;
+  areaHa: number;
+  cost: number;
+  /** 每 10 万美元避免的受波及房屋；无成本时为 null */
+  savedPer100k: number | null;
+  /** 与无处理的差异在随机噪声以内 */
+  withinNoise: boolean;
+  overBudget: boolean;
+}
 
 export type Mode = "plan" | "respond";
 
@@ -19,7 +34,15 @@ export interface ShellHandlers {
   onLayer(layer: LayerId): void;
   onShowWind(show: boolean): void;
   onShowSmoke(show: boolean): void;
+  onTool(tool: Tool | null): void;
+  onBrush(radiusCells: number): void;
+  onClearPlan(): void;
+  onBudget(dollars: number): void;
+  onSuggest(): void;
+  onShowPlan(key: PlanKey): void;
 }
+
+const fmtMoney = (v: number) => (v >= 1e6 ? `$${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `$${Math.round(v / 1e3)}k` : `$${Math.round(v)}`);
 
 const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
 export const compassName = (deg: number) => COMPASS[Math.round((((deg % 360) + 360) % 360) / 22.5) % 16];
@@ -69,6 +92,27 @@ export class Shell {
       <section data-mode-only="plan" class="first">
         <h2>This area</h2>
         <dl class="metrics" id="overview"></dl>
+      </section>
+      <section data-mode-only="plan">
+        <h2>Treatments</h2>
+        <div class="tool-grid" id="tools" role="toolbar" aria-label="Treatment tools">
+          ${TREATMENT_TYPES.map((t) => `<button class="tool" data-tool="${t}" aria-pressed="false"><i class="swatch-${t}"></i>${TREATMENT_LABELS[t]}</button>`).join("")}
+          <button class="tool" data-tool="erase" aria-pressed="false"><i class="swatch-erase"></i>Erase</button>
+        </div>
+        <p class="tool-note" id="tool-note">Pick a treatment, then drag on the map to paint it. Clicking the map without a treatment starts a test fire.</p>
+        <div class="row-control"><label for="brush">Brush</label><input class="range" id="brush" type="range" min="1" max="8" step="1" value="3" /><span class="figure" id="brush-label"></span></div>
+        <dl class="metrics" id="plan-summary"></dl>
+        <button class="btn btn-quiet" id="clear-plan">Clear my plan</button>
+      </section>
+      <section data-mode-only="plan">
+        <h2>Compare plans</h2>
+        <div class="row-control"><label for="budget">Budget</label><input class="range" id="budget" type="range" min="10000" max="500000" step="10000" /><span class="figure" id="budget-label"></span></div>
+        <button class="btn btn-primary btn-block" id="suggest">Suggest plans and compare</button>
+        <table class="compare" id="compare" hidden>
+          <thead><tr><th></th>${(["none", "yours", "greedy", "mincut"] as PlanKey[]).map((k) => `<th><button data-plan="${k}" aria-pressed="false">${PLAN_LABELS[k]}</button></th>`).join("")}</tr></thead>
+          <tbody id="compare-body"></tbody>
+        </table>
+        <p class="tool-note" id="compare-status">Compares your plan with two algorithm plans under the current wind and test-fire ignition. Every plan runs the same fire simulation five times.</p>
       </section>
       <section data-mode-only="plan">
         <h2>Test a fire</h2>
@@ -175,6 +219,30 @@ export class Shell {
       this.handlers.onLayer(layer.value as LayerId);
     });
     this.q<HTMLInputElement>("#show-wind").addEventListener("change", (e) => this.handlers.onShowWind((e.target as HTMLInputElement).checked));
+    this.q<HTMLDivElement>("#tools").addEventListener("click", (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-tool]");
+      if (!b) return;
+      const tool = b.getAttribute("aria-pressed") === "true" ? null : (b.dataset.tool as Tool);
+      this.setTool(tool);
+      this.handlers.onTool(tool);
+    });
+    const brush = this.q<HTMLInputElement>("#brush");
+    brush.addEventListener("input", () => {
+      this.setBrush(Number(brush.value));
+      this.handlers.onBrush(Number(brush.value));
+    });
+    this.q<HTMLButtonElement>("#clear-plan").addEventListener("click", () => this.handlers.onClearPlan());
+    const budget = this.q<HTMLInputElement>("#budget");
+    budget.addEventListener("input", () => {
+      this.setBudget(Number(budget.value));
+      this.handlers.onBudget(Number(budget.value));
+    });
+    this.q<HTMLButtonElement>("#suggest").addEventListener("click", () => this.handlers.onSuggest());
+    this.q<HTMLTableElement>("#compare").addEventListener("click", (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-plan]");
+      if (b) this.handlers.onShowPlan(b.dataset.plan as PlanKey);
+    });
+    this.setBrush(3);
     this.q<HTMLInputElement>("#show-smoke").addEventListener("change", (e) => this.handlers.onShowSmoke((e.target as HTMLInputElement).checked));
 
     this.setSpeed(opts.stepsPerSecond);
@@ -262,6 +330,73 @@ export class Shell {
 
   hideHover() {
     this.q<HTMLDivElement>("#hover-tag").hidden = true;
+  }
+
+  // ---- 处理方案 ----
+  tool: Tool | null = null;
+
+  setTool(tool: Tool | null) {
+    this.tool = tool;
+    document.querySelectorAll<HTMLButtonElement>("#tools button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.tool === tool)));
+    document.body.classList.toggle("painting", !!tool);
+    this.q<HTMLParagraphElement>("#tool-note").textContent = !tool
+      ? "Pick a treatment, then drag on the map to paint it. Clicking the map without a treatment starts a test fire."
+      : tool === "erase"
+        ? "Drag on the map to remove treatments. Press Esc to stop painting."
+        : `${TREATMENT_NOTES[tool]}. ${tool === "zone0" ? "Applies to homes only." : "Applies to wildland vegetation only."} Press Esc to stop painting.`;
+  }
+
+  setBrush(r: number) {
+    this.q<HTMLInputElement>("#brush").value = String(r);
+    this.q<HTMLSpanElement>("#brush-label").textContent = `${Math.round(r * 2 * 25)} m`;
+  }
+
+  setBudget(v: number) {
+    this.q<HTMLInputElement>("#budget").value = String(v);
+    this.q<HTMLSpanElement>("#budget-label").textContent = fmtMoney(v);
+  }
+
+  setPlanSummary(byType: Record<string, number>, cost: number) {
+    const rows = TREATMENT_TYPES.filter((t) => byType[t] > 0).map((t) => `<dt>${TREATMENT_LABELS[t]}</dt><dd>${byType[t].toFixed(1)} ha</dd>`);
+    this.q<HTMLDListElement>("#plan-summary").innerHTML = rows.length ? `${rows.join("")}<dt>Cost</dt><dd>${fmtMoney(cost)}</dd>` : "";
+    this.q<HTMLButtonElement>("#clear-plan").hidden = !rows.length;
+  }
+
+  setCompareStatus(text: string, busy = false) {
+    this.q<HTMLParagraphElement>("#compare-status").textContent = text;
+    const b = this.q<HTMLButtonElement>("#suggest");
+    b.disabled = busy;
+    b.textContent = busy ? "Working…" : "Suggest plans and compare";
+  }
+
+  setCompare(rows: Partial<Record<PlanKey, PlanRow>>, active: PlanKey | null, staleYours = false) {
+    const table = this.q<HTMLTableElement>("#compare");
+    const keys: PlanKey[] = ["none", "yours", "greedy", "mincut"];
+    table.hidden = !keys.some((k) => rows[k]);
+    table.querySelectorAll<HTMLButtonElement>("thead button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.plan === active)));
+    const cell = (k: PlanKey, f: (r: PlanRow) => string) => {
+      const r = rows[k];
+      const stale = k === "yours" && staleYours;
+      return `<td class="${stale ? "stale" : ""}${k === active ? " active" : ""}">${r ? f(r) : "–"}</td>`;
+    };
+    // 每一行里最好的那一格加粗
+    const best = (f: (r: PlanRow) => number, lower: boolean) => {
+      let bk: PlanKey | null = null;
+      for (const k of keys) {
+        const r = rows[k];
+        if (!r || k === "none" || r.withinNoise) continue;
+        if (bk === null || (lower ? f(r) < f(rows[bk]!) : f(r) > f(rows[bk]!))) bk = k;
+      }
+      return bk;
+    };
+    const bestHomes = best((r) => r.homes, true);
+    const mark = (k: PlanKey, b: PlanKey | null, text: string) => (k === b ? `<strong>${text}</strong>` : text);
+    this.q<HTMLTableSectionElement>("#compare-body").innerHTML = [
+      `<tr><th>Homes reached</th>${keys.map((k) => cell(k, (r) => mark(k, bestHomes, Math.round(r.homes).toLocaleString("en-US")))).join("")}</tr>`,
+      `<tr><th>Area burned, ha</th>${keys.map((k) => cell(k, (r) => Math.round(r.areaHa).toLocaleString("en-US"))).join("")}</tr>`,
+      `<tr><th>Cost</th>${keys.map((k) => cell(k, (r) => (r.cost ? fmtMoney(r.cost) + (r.overBudget ? "*" : "") : "–"))).join("")}</tr>`,
+      `<tr><th>Homes saved per $100k</th>${keys.map((k) => cell(k, (r) => (r.withinNoise ? "≈ 0" : r.savedPer100k === null ? "–" : r.savedPer100k.toFixed(1)))).join("")}</tr>`,
+    ].join("");
   }
 
   // ---- 侧栏内容 ----

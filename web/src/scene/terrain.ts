@@ -68,6 +68,9 @@ uniform sampler2D uWater; // R 河岸有向距离（米），G 路缘有向距�
 uniform vec3 uSkyColor;   // 水面反射的天空颜色，随模式变化
 uniform float uWaterTime;
 uniform float uSimMinutes; // 当前模拟时间（分钟）
+uniform sampler2D uTreat; // 处理掩膜：R × 255 = 0 无，1 防火带，2 计划烧除，3 疏伐，4 Zone 0
+uniform bool uHasTreat;
+uniform vec3 uRetardant;
 uniform float uStepMinutes; // 每步分钟数
 uniform sampler2D uState; // 火势模拟状态：R = 0 未燃 / 1 燃烧中 / 2 已燃尽
 uniform bool uUseState;
@@ -115,6 +118,22 @@ vec3 ramp(float t) {
   if (t < 1.0) return mix(uRamp[0], uRamp[1], t);
   if (t < 2.0) return mix(uRamp[1], uRamp[2], t - 1.0);
   return mix(uRamp[2], uRamp[3], t - 2.0);
+}
+
+// 四种处理手段的覆盖度（双线性），边缘平滑
+vec4 treatCoverage(vec2 p) {
+  vec2 f = fract(p);
+  ivec2 c = ivec2(floor(p));
+  ivec2 hi = ivec2(uGridSize) - 1;
+  vec4 acc = vec4(0.0);
+  for (int j = 0; j < 2; j++) {
+    for (int i = 0; i < 2; i++) {
+      int t = int(texelFetch(uTreat, clamp(c + ivec2(i, j), ivec2(0), hi), 0).r * 255.0 + 0.5);
+      float wgt = (i == 1 ? f.x : 1.0 - f.x) * (j == 1 ? f.y : 1.0 - f.y);
+      acc += wgt * vec4(t == 1, t == 2, t == 3, t == 4);
+    }
+  }
+  return smoothstep(0.3, 0.6, acc);
 }
 
 vec4 waterAt(vec2 p) {
@@ -292,6 +311,27 @@ void main() {
     }
   }
 
+  // 处理区：统一用阻燃剂粉红（人的干预），四种手段用不同纹理区分，不只靠颜色（色觉无障碍）
+  if (uHasTreat) {
+    vec4 tc = treatCoverage(vCell);
+    if (dot(tc, vec4(1.0)) > 0.001) {
+      float u = (vWorldXZ.x + vWorldXZ.y) / 14.0;
+      float aaS = fwidth(u) * 1.2;
+      float stripe = smoothstep(0.5 - aaS, 0.5 + aaS, abs(fract(u) - 0.5) * 2.0);
+      float v = (vWorldXZ.x - vWorldXZ.y) / 14.0;
+      float cross = smoothstep(0.5 - aaS, 0.5 + aaS, abs(fract(v) - 0.5) * 2.0);
+      vec2 g = fract(vWorldXZ / 10.0) - 0.5;
+      float dots = 1.0 - smoothstep(0.18, 0.24, length(g));
+      vec3 bare = vec3(0.62, 0.55, 0.45); // 防火带：清到裸土
+      vec3 pink = uRetardant * mix(1.0, 0.55, uNight);
+      // 防火带：裸土 + 粉色斜线；计划烧除：粉色斜线；疏伐：粉色圆点；Zone 0：粉色交叉线
+      col = mix(col, mix(bare * (0.32 + 0.18 * sky + 0.72 * diffuse) * mix(1.0, 0.38, uNight), pink, stripe * 0.75), tc.x);
+      col = mix(col, pink, tc.y * stripe * 0.7);
+      col = mix(col, pink, tc.z * dots * 0.8);
+      col = mix(col, pink, tc.w * max(stripe, cross) * 0.6);
+    }
+  }
+
   // 悬停格子描边
   vec2 d = abs(vCell - uHover);
   float m = max(d.x, d.y);
@@ -368,6 +408,9 @@ export class Terrain {
           uSkyColor: { value: new THREE.Color("#d4d8cf") },
           uWaterTime: { value: 0 },
           uSimMinutes: { value: 0 },
+          uTreat: { value: null },
+          uHasTreat: { value: false },
+          uRetardant: { value: new THREE.Color("#D63A73") },
           uStepMinutes: { value: 5 },
           uState: { value: null },
           uUseState: { value: false },

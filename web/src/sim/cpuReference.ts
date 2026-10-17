@@ -2,7 +2,7 @@
 // 用途：1) 验证 GPU 实现的正确性；2) P3 的 CPU / GPU 性能对比。
 // GPU 用 float32、CPU 用 float64 计算概率，极少数临界格子会因舍入不同而分岔，所以对照看统计量而不是逐格相等。
 
-import { SpreadParams, type Grid, type WindField } from "@core";
+import { SpreadParams, TreatmentEffect, type Grid, type WindField } from "@core";
 import { windGrid } from "./wind";
 
 function pcg(v: number): number {
@@ -19,6 +19,18 @@ export function rand(x: number, y: number, step: number, seed: number, k: number
 export interface CpuSimOptions {
   seed: number;
   spotting: boolean;
+  /** 处理掩膜（0 无，1 防火带，2 计划烧除，3 疏伐，4 Zone 0），与 GPU 的 uTreat 一致 */
+  mask?: Uint8Array;
+}
+
+/** 处理手段对蔓延概率的倍率，与 GPU shader 一致 */
+export function treatmentMultipliers() {
+  return {
+    break: TreatmentEffect.break.fuelMul,
+    burn: TreatmentEffect.burn.fuelMul,
+    thin: TreatmentEffect.thin.rosMul,
+    zone0: TreatmentEffect.zone0.emberMul,
+  };
 }
 
 export class CpuFireSim {
@@ -79,6 +91,9 @@ export class CpuFireSim {
           continue;
         }
         if (cls < 0.5) continue;
+        const M = treatmentMultipliers();
+        const treat = this.opts.mask ? this.opts.mask[c] : 0;
+        const treatMul = treat === 1 ? M.break : treat === 2 ? M.burn : treat === 3 ? M.thin : 1;
         const vx = this.wind[c * 2];
         const vy = this.wind[c * 2 + 1];
         const V = Math.hypot(vx, vy);
@@ -103,13 +118,13 @@ export class CpuFireSim {
               const pw = Math.exp(P.c1 * V) * Math.exp(P.c2 * V * (cosT - 1));
               const slope = (Math.atan2(elev - g[n * 4], dist) * 180) / Math.PI;
               const ps = Math.exp(P.a * slope);
-              const p = Math.min(1, Math.max(0, base * pw * ps * (diag ? 0.83 : 1)));
+              const p = Math.min(1, Math.max(0, base * pw * ps * (diag ? 0.83 : 1) * treatMul));
               notIgnite *= 1 - p;
             }
         }
         if (this.opts.spotting && V > 2) {
           const meanDist = P.spot.distMeanPerWindMs * V;
-          const sus = cls > 1.5 ? 2.5 * (0.5 + dry) : fuel * (0.5 + dry);
+          const sus = (cls > 1.5 ? 2.5 * (0.5 + dry) * (treat === 4 ? M.zone0 : 1) : fuel * (0.5 + dry)) * treatMul;
           for (let k = 0; k < Math.min(8, P.spot.samples); k++) {
             const u1 = Math.max(rand(x, y, this.step, seed, 10 + k * 3), 1e-6);
             const u2 = rand(x, y, this.step, seed, 11 + k * 3);

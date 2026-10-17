@@ -21,6 +21,7 @@ import { windGrid, windToGrid } from "./sim/wind";
 import { TerrainWindModel, WindLibrary, buildWindField, type WindMode } from "./sim/terrainWind";
 import { CpuFireSim } from "./sim/cpuReference";
 import { Shell, compassName, type Mode } from "./ui/shell";
+import { PlannerController } from "./planner/controller";
 
 const q = new URLSearchParams(location.search);
 const debug = q.has("debug");
@@ -131,6 +132,12 @@ const shell = new Shell(
       applyWind();
     },
     onLayer: (layer) => (terrain.layer = layer),
+    onTool: (tool) => planner.setTool(tool),
+    onBrush: (r) => planner.setBrush(r),
+    onClearPlan: () => planner.clear(),
+    onBudget: (v) => planner.setBudget(v),
+    onSuggest: () => planner.suggest(),
+    onShowPlan: (key) => planner.show(key),
     onShowSmoke: (show) => {
       smoke.object.visible = show;
     },
@@ -174,6 +181,7 @@ window.dispatchEvent(new Event("resize"));
 
 const resetSim = () => {
   sim.reset();
+  testIgnitions = [];
   headPrev = null;
   frontSpeed = 0;
   smoke.clear();
@@ -212,6 +220,26 @@ applyNight(0);
 
 // ---- 悬停信息与点击点火 ----
 const picker = new TerrainPicker(grid, ctx.camera, ctx.renderer.domElement, terrain);
+
+// ---- 防控方案（P4） ----
+// 最近一次测试火的点火格，供方案对比使用；重置时清空
+let testIgnitions: number[] = [];
+const planner: PlannerController = new PlannerController({
+  grid,
+  buildings: bundle.buildings,
+  sim,
+  renderer: ctx.renderer,
+  gridTexture: terrain.gridTexture,
+  terrainUniforms: terrain.uniforms,
+  propUniforms: propMaterial.uniforms,
+  controls: ctx.controls,
+  picker,
+  canvas: ctx.renderer.domElement,
+  shell,
+  inflow,
+  windField: () => currentWind,
+  ignitions: () => testIgnitions,
+});
 let pending: PointerEvent | null = null;
 ctx.renderer.domElement.addEventListener("pointermove", (e) => (pending = e));
 ctx.renderer.domElement.addEventListener("pointerleave", () => {
@@ -256,7 +284,7 @@ ctx.onFrame(() => {
 let downAt: [number, number] | null = null;
 ctx.renderer.domElement.addEventListener("pointerdown", (e) => (downAt = [e.clientX, e.clientY]));
 ctx.renderer.domElement.addEventListener("pointerup", (e) => {
-  if (!downAt) return;
+  if (!downAt || planner.isPainting) return;
   const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
   downAt = null;
   if (moved > 4) return;
@@ -264,6 +292,7 @@ ctx.renderer.domElement.addEventListener("pointerup", (e) => {
   if (!hit) return;
   activateSim();
   sim.igniteDisc(hit.x, hit.y, 1.5);
+  testIgnitions.push(hit.cell);
   monitor.log(sim.minutes, `Ignition at ${Math.round(grid.data[hit.cell * GRID_CHANNELS]).toLocaleString("en-US")} m, ${describe(hit.cell).toLowerCase()}`, "watch");
   simParams.running = true;
   shell.setRunning(true);
@@ -504,6 +533,14 @@ if (igniteQ?.length === 2 && igniteQ.every(Number.isFinite)) {
   smoke.warmup(smoke.material.uniforms.uLife.value, 0);
   refreshPanels();
 }
+// ?paint=x0,y0,x1,y1,类型[,半径] 画一条处理线；?suggest 加载后生成并对比方案
+const paintQ = q.get("paint")?.split(",");
+if (paintQ && paintQ.length >= 5) {
+  const [x0, y0, x1, y1] = paintQ.slice(0, 4).map(Number);
+  planner.yours.stroke(x0, y0, x1, y1, Number(paintQ[5]) || 3, paintQ[4] as "break");
+  planner.commitEdit();
+}
+if (q.has("suggest")) planner.suggest();
 if (q.has("cpucheck")) runCpuCheck(Number(q.get("cpucheck")) || 80);
 const modeParam = q.get("mode");
 if (modeParam === "respond" || modeParam === "plan") {

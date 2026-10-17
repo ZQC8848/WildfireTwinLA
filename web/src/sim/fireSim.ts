@@ -4,6 +4,7 @@
 import * as THREE from "three";
 import { FullScreenQuad } from "three/examples/jsm/postprocessing/Pass.js";
 import { CellClass, GRID_CHANNELS, SpreadParams, type Grid, type WindField } from "@core";
+import { treatmentMultipliers } from "./cpuReference";
 import { fullscreenVertex, igniteFragment, resetFragment, stepFragment } from "./shaders";
 import { WindTexture } from "./wind";
 
@@ -30,6 +31,9 @@ export class FireSim {
   private wind: WindTexture;
   private mask: Float32Array;
   private maskTex: THREE.DataTexture;
+  /** 处理掩膜纹理（每格 1 字节，0–4），与地形、模型 shader 共用 */
+  readonly treatTex: THREE.DataTexture;
+  readonly treatMask: Uint8Array;
   private readBuf: Float32Array;
   private reading = false;
   private lastStats: FireStats;
@@ -65,6 +69,11 @@ export class FireSim {
     this.maskTex = new THREE.DataTexture(this.mask, width, height, THREE.RedFormat, THREE.FloatType);
     this.maskTex.needsUpdate = true;
     this.readBuf = new Float32Array(width * height * 4);
+    this.treatMask = new Uint8Array(width * height);
+    this.treatTex = new THREE.DataTexture(this.treatMask, width, height, THREE.RedFormat, THREE.UnsignedByteType);
+    this.treatTex.minFilter = THREE.NearestFilter;
+    this.treatTex.magFilter = THREE.NearestFilter;
+    this.treatTex.needsUpdate = true;
     this.lastStats = { minutes: 0, burningCells: 0, burnedCells: 0, burnedAreaHa: 0, buildingCellsBurned: 0 };
 
     const mat = (fragmentShader: string, uniforms: Record<string, THREE.IUniform>) =>
@@ -88,7 +97,13 @@ export class FireSim {
       uSpotBase: { value: SpreadParams.spot.pBase },
       uSpotDistPerMs: { value: SpreadParams.spot.distMeanPerWindMs },
       uSpotSamples: { value: SpreadParams.spot.samples },
+      uTreat: { value: null },
+      uBreakMul: { value: treatmentMultipliers().break },
+      uBurnMul: { value: treatmentMultipliers().burn },
+      uThinMul: { value: treatmentMultipliers().thin },
+      uZone0Mul: { value: treatmentMultipliers().zone0 },
     });
+    this.stepMat.uniforms.uTreat.value = this.treatTex;
     this.igniteMat = mat(igniteFragment, {
       uState: { value: null },
       uGrid: { value: gridTexture },
@@ -111,6 +126,12 @@ export class FireSim {
 
   get minutes(): number {
     return this.step * SpreadParams.stepMinutes;
+  }
+
+  /** 设置处理掩膜（长度 = 格子数，值 0–4） */
+  setTreatments(mask: Uint8Array) {
+    this.treatMask.set(mask);
+    this.treatTex.needsUpdate = true;
   }
 
   setWind(field: WindField) {

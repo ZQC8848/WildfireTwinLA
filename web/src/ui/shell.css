@@ -554,3 +554,169 @@ body:not(.debug) .stats {
   justify-content: flex-start;
   gap: 6px;
 }
+
+/* ---- 处理工具与方案对比 ---- */
+.tool-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.tool {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--rule);
+  background: var(--surface-raised);
+  cursor: pointer;
+  text-align: left;
+  font-size: var(--t-13);
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tool[aria-pressed="true"] {
+  border-color: var(--retardant);
+  box-shadow: inset 0 0 0 1px var(--retardant);
+  font-weight: 600;
+}
+
+.tool i {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid var(--rule);
+}
+
+/* 色块与地图上的纹理对应：防火带 = 裸土 + 斜线，烧除 = 斜线，疏伐 = 圆点，Zone 0 = 交叉线 */
+.swatch-break {
+  background: repeating-linear-gradient(45deg, var(--retardant) 0 2px, #9e8c73 2px 5px);
+}
+.swatch-burn {
+  background: repeating-linear-gradient(45deg, var(--retardant) 0 2px, transparent 2px 5px);
+}
+.swatch-thin {
+  background: radial-gradient(circle, var(--retardant) 1.5px, transparent 2px) 0 0 / 5px 5px;
+}
+.swatch-zone0 {
+  background:
+    repeating-linear-gradient(45deg, var(--retardant) 0 1.5px, transparent 1.5px 5px),
+    repeating-linear-gradient(-45deg, var(--retardant) 0 1.5px, transparent 1.5px 5px);
+}
+.swatch-erase {
+  background: var(--surface);
+}
+
+.tool-note {
+  margin: 10px 0 !important;
+  font-size: var(--t-13);
+}
+
+.row-control {
+  display: grid;
+  grid-template-columns: 56px 1fr 64px;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  color: var(--ink-muted);
+}
+
+.row-control .range {
+  width: 100%;
+  accent-color: var(--retardant);
+}
+
+.row-control .figure {
+  text-align: right;
+  color: var(--ink);
+}
+
+.btn-quiet {
+  height: 30px;
+  margin-top: 8px;
+  background: transparent;
+}
+
+.btn-block {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.compare {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-13);
+  margin-top: 4px;
+}
+
+.compare th,
+.compare td {
+  padding: 5px 2px;
+  border-top: 1px solid var(--rule);
+}
+
+.compare thead th {
+  border-top: 0;
+}
+
+.compare tbody th {
+  text-align: left;
+  font-weight: 400;
+  color: var(--ink-muted);
+  line-height: 1.2;
+}
+
+.compare td {
+  text-align: right;
+  white-space: nowrap;
+  font-family: var(--font-figure);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.compare td.active {
+  background: rgba(214, 58, 115, 0.08);
+}
+
+.compare td.stale {
+  color: var(--ink-muted);
+  font-style: italic;
+}
+
+.compare thead button {
+  width: 100%;
+  white-space: nowrap;
+  border: 0;
+  background: transparent;
+  padding: 3px 0;
+  border-radius: 3px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: var(--t-13);
+  text-align: right;
+  color: var(--ink-muted);
+}
+
+.compare thead button[aria-pressed="true"] {
+  color: var(--retardant);
+}
+
+body.painting #app canvas {
+  cursor: crosshair;
+}
+
+.compare td strong {
+  font-weight: 700;
+  color: var(--retardant);
+}
