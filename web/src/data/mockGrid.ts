@@ -1,6 +1,8 @@
 // 合成网格：在 Tia 的真实数据就绪前使用，格式与约定 1 完全一致。
-// 地形大致模仿 Altadena：北侧是 San Gabriel 山地，南侧是有建筑的山麓平原。
+// 地理位置放在 Norte Fire 的范围（docs/norte-fire.md），回放的火点按经纬度落到这张网格上；
+// 地形本身是合成的（北侧山地、南侧有建筑的平原），不代表 San Juan Capistrano 的真实地形。
 
+import { NORTE_BBOX } from "./norte";
 import {
   CellClass,
   GRID_CHANNELS,
@@ -62,7 +64,7 @@ export function createMockGrid(width = 512, height = 512, cellSize = 25, seed = 
   const rand = mulberry32(seed);
   const fbm = makeValueNoise(rand);
 
-  const originUTM = lonLatToUTM(-118.2, 34.27);
+  const originUTM = lonLatToUTM(NORTE_BBOX[0], NORTE_BBOX[3]);
   const [west, north] = utmToLonLat(originUTM[0], originUTM[1]);
   const [east, south] = utmToLonLat(originUTM[0] + width * cellSize, originUTM[1] - height * cellSize);
   const meta: GridMeta = {
@@ -125,7 +127,7 @@ export function createMockGrid(width = 512, height = 512, cellSize = 25, seed = 
   }
 
   // 社区：建筑区按东西方向分为三段
-  const names = ["West Altadena", "Central Altadena", "East Altadena"];
+  const names = ["West neighborhood", "Central neighborhood", "East neighborhood"];
   const communities: Community[] = names.map((name, k) => ({ id: `c${k}`, name, cells: [] }));
   const buildings: Building[] = [];
   const half = cellSize / 2;

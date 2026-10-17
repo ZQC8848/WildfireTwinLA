@@ -33,6 +33,8 @@ export interface ShellHandlers {
   onWindModel(model: "terrain" | "uniform"): void;
   onLayer(layer: LayerId): void;
   onShowWind(show: boolean): void;
+  onForecast(): void;
+  onShowForecast(show: boolean): void;
   onShowSmoke(show: boolean): void;
   onTool(tool: Tool | null): void;
   onBrush(radiusCells: number): void;
@@ -130,19 +132,28 @@ export class Shell {
       <section data-mode-only="respond" class="first">
         <h2>Data source</h2>
         <div class="segmented feed-modes" id="feed-mode" role="group" aria-label="Data source">
-          <button data-feed="off" aria-pressed="true">Simulation</button><button data-feed="live" aria-pressed="false">Live feed</button><button data-feed="replay" aria-pressed="false">Eaton replay</button>
+          <button data-feed="off" aria-pressed="true">Simulation</button><button data-feed="live" aria-pressed="false">Live feed</button><button data-feed="replay" aria-pressed="false">Norte replay</button>
         </div>
-        <p class="tool-note" id="feed-status">Test fires you place on the map. Switch to the live feed for satellite hotspots, or replay the Eaton Fire.</p>
+        <p class="tool-note" id="feed-status">Shows the test fire from Plan mode. Switch to the live feed for satellite hotspots, or replay the Norte Fire of Oct 16, 2026.</p>
         <dl class="metrics" id="feed-metrics"></dl>
+        <p class="tool-note feed-legend" id="feed-legend" hidden><i class="sw sw-sat"></i>Satellite hotspot <i class="sw sw-miss"></i>Model had not reached it <i class="sw sw-report"></i>Reported ignition</p>
       </section>
       <section data-mode-only="respond">
-        <div id="respond-empty"><h2>No active fire</h2><p>Click the map to place an ignition. Distances, arrival estimates and affected homes update as the fire spreads.</p></div>
+        <div id="respond-empty"><h2>No active fire</h2><p>Start the Norte replay or the live feed above, or place a test fire in Plan mode. Distances, arrival estimates and affected homes update as the fire spreads.</p></div>
         <div id="respond-closest" hidden>
           <h2>Closest community</h2>
           <div class="closest-name" id="closest-name"></div>
           <div class="closest-figure" id="closest-figure"></div>
           <div class="closest-note" id="closest-note"></div>
         </div>
+      </section>
+      <section data-mode-only="respond" id="forecast-section">
+        <h2>Forecast, next 8 hours</h2>
+        <button class="btn btn-block" id="forecast-run" disabled>Run 64-run forecast</button>
+        <label class="map-card-row forecast-show"><input type="checkbox" id="forecast-show" checked /> Show on map</label>
+        <p class="tool-note" id="forecast-status">64 fire simulations from the current fire, each with the wind direction varied up to ±15° and the speed up to ±20%.</p>
+        <table class="compare" id="forecast-table" hidden></table>
+        <p class="tool-note" id="forecast-legend" hidden>Shading: chance of burning. Lines: median arrival, one per hour. Chance is the share of runs in which the fire reaches the community.</p>
       </section>
       <section data-mode-only="respond">
         <h2>Communities</h2>
@@ -187,7 +198,7 @@ export class Shell {
       <div class="bar-group">
         <label for="wind-dir">Wind from</label>
         <select class="select" id="wind-dir">${dirOptions}</select>
-        <input class="range" id="wind-speed" type="range" min="0" max="30" step="1" aria-label="Wind speed" />
+        <input class="range" id="wind-speed" type="range" min="0" max="30" step="0.5" aria-label="Wind speed" />
         <span class="figure" id="wind-speed-label"></span>
       </div>
       <div class="bar-group">
@@ -294,6 +305,8 @@ export class Shell {
     this.q<HTMLButtonElement>("#now").addEventListener("click", () => this.handlers.onNow());
     this.setBrush(3);
     this.q<HTMLInputElement>("#show-smoke").addEventListener("change", (e) => this.handlers.onShowSmoke((e.target as HTMLInputElement).checked));
+    this.q<HTMLButtonElement>("#forecast-run").addEventListener("click", () => this.handlers.onForecast());
+    this.q<HTMLInputElement>("#forecast-show").addEventListener("change", (e) => this.handlers.onShowForecast((e.target as HTMLInputElement).checked));
 
     this.setSpeed(opts.stepsPerSecond);
     this.setWind(opts.windDir, opts.windSpeed);
@@ -474,13 +487,39 @@ export class Shell {
     ].join("");
   }
 
+  // ---- 集合预报 ----
+  setForecast(available: boolean, status: string | null, rows: { name: string; probability: number; medianMin: number | null; earlyMin: number | null }[] | null) {
+    this.q<HTMLButtonElement>("#forecast-run").disabled = !available;
+    if (status) this.q<HTMLParagraphElement>("#forecast-status").textContent = status;
+    const table = this.q<HTMLTableElement>("#forecast-table");
+    table.hidden = !rows;
+    this.q<HTMLParagraphElement>("#forecast-legend").hidden = !rows;
+    if (!rows) return;
+    const t = (m: number | null) => (m === null ? "–" : formatMinutes(m));
+    const pct = (p: number) => (p > 0 && p < 0.02 ? "< 2%" : `${Math.round(p * 100)}%`);
+    table.innerHTML =
+      `<thead><tr><th></th><th>Chance</th><th>Median</th><th>Earliest</th></tr></thead><tbody>` +
+      [...rows]
+        .sort((a, b) => b.probability - a.probability)
+        .map((r) => `<tr><th>${esc(r.name)}</th><td class="${r.probability >= 0.5 ? "ember" : ""}">${pct(r.probability)}</td><td>${t(r.medianMin)}</td><td>${t(r.earlyMin)}</td></tr>`)
+        .join("") +
+      "</tbody>";
+  }
+
   // ---- 数据源 ----
-  setFeed(mode: "off" | "live" | "replay", status: string, rows: [string, string][]) {
+  setFeed(mode: "off" | "live" | "replay", status: string, rows: [string, string][], bundled = false) {
     document.querySelectorAll<HTMLButtonElement>("#feed-mode button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.feed === mode)));
-    this.q<HTMLParagraphElement>("#feed-status").textContent =
-      mode === "off" ? "Test fires you place on the map. Switch to the live feed for satellite hotspots, or replay the Eaton Fire." : status;
+    const notes: Record<typeof mode, string> = {
+      off: "Shows the test fire from Plan mode. Switch to the live feed for satellite hotspots, or replay the Norte Fire of Oct 16, 2026.",
+      live: status,
+      replay:
+        `${status} After-the-fact replay of the Norte Fire from public data (NIFC incident records, NASA FIRMS, NOAA HRRR wind). Not an official product.` +
+        (bundled ? " Evacuation orders and the final perimeter are not in this replay yet." : ""),
+    };
+    this.q<HTMLParagraphElement>("#feed-status").textContent = notes[mode];
+    this.q<HTMLParagraphElement>("#feed-legend").hidden = mode === "off";
     this.q<HTMLDListElement>("#feed-metrics").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
-    this.feedLabel = mode === "live" ? "Live feed" : mode === "replay" ? "Eaton replay" : "";
+    this.feedLabel = mode === "live" ? "Live feed" : mode === "replay" ? "Norte replay" : "";
   }
 
   private feedLabel = "";

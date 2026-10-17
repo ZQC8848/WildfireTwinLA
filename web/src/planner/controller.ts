@@ -34,6 +34,8 @@ export interface PlannerDeps {
   inflow(): Wind;
   windField(): WindField;
   ignitions(): number[];
+  /** 默认情景的点火格（没有测试火时使用），如 Norte Fire 的报告起火点 */
+  scenario?(): { cells: number[]; label: string };
 }
 
 export class PlannerController {
@@ -212,9 +214,8 @@ export class PlannerController {
       this.rows.none = this.evaluate("none", this.plans.none!);
       for (const k of ["greedy", "mincut"] as PlanKey[]) this.rows[k] = this.evaluate(k, this.plans[k]!);
       this.rows.yours = this.evaluate("yours", this.yours.mask);
-      const fromTestFire = this.d.ignitions().length > 0;
       shell.setCompareStatus(
-        `Same fire for every plan: ${fromTestFire ? "your test-fire ignition" : "a likely ignition upwind of the communities"}, current wind, 8 hours, averaged over ${EVAL_SEEDS.length} runs. Planner took ${(r.ms / 1000).toFixed(1)} s.` +
+        `Same fire for every plan: ${this.ignitionLabel()}, current wind, 8 hours, averaged over ${EVAL_SEEDS.length} runs. Planner took ${(r.ms / 1000).toFixed(1)} s.` +
           ` Differences under ${Math.round(this.noise)} homes are within run-to-run noise.` +
           greedyNote(r, this.budget) +
           (this.rows.mincut?.overBudget ? " * Over budget: the min-cut line ignores the budget." : ""),
@@ -263,10 +264,18 @@ export class PlannerController {
     return len > 1e-3 ? [vx / len, vy / len] : [0, 1];
   }
 
-  /** 情景点火点：有测试火就用测试火的点火点；否则在社区上风方向约 4 km 处取三个高燃料点 */
+  private ignitionLabel(): string {
+    if (this.d.ignitions().length) return "your test-fire ignition";
+    const sc = this.d.scenario?.();
+    return sc?.cells.length ? sc.label : "a likely ignition upwind of the communities";
+  }
+
+  /** 情景点火点：有测试火就用测试火的点火点；其次用默认情景；否则在社区上风方向约 4 km 处取三个高燃料点 */
   private scenarioIgnitions(): number[] {
     const user = this.d.ignitions();
     if (user.length) return user;
+    const sc = this.d.scenario?.();
+    if (sc?.cells.length) return sc.cells;
     const { grid, buildings } = this.d;
     const { width: W, cellSize: S } = grid.meta;
     if (!buildings.length) return [];

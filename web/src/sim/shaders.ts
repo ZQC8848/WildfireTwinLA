@@ -14,6 +14,10 @@
 // 飞火：在上风方向按对数正态距离采样，采样点在燃烧则以 pSpot 概率点燃；建筑格只能被飞火点燃。
 //
 // 随机数用无符号整数哈希（PCG），GPU 与 CPU 参考实现得到同一串随机数。
+//
+// 集合预报（P3）：同一个 shader 支持把 uTiles.x × uTiles.y 个成员拼成一张图集，每个成员是 uSize 大小的一块。
+// 邻格与飞火查找限制在本块内；每块有自己的随机种子和风扰动（风向 ±uDirJitter、风速 ±uSpeedJitter）。
+// 第 0 块不加扰动、种子不变，所以 uTiles = (1, 1) 时与单次模拟完全一致（CPU 对照不受影响）。
 
 export const fullscreenVertex = /* glsl */ `
 void main() {
@@ -61,6 +65,9 @@ uniform bool uSpotting;
 uniform float uSpotBase;
 uniform float uSpotDistPerMs;
 uniform int uSpotSamples;
+uniform ivec2 uTiles;
+uniform float uDirJitter;   // 弧度
+uniform float uSpeedJitter; // 比例
 
 vec2 windAt(ivec2 c) {
   // 与 core.windAt 一致：网格角点对齐采样网格角点，在速度分量上双线性插值
@@ -74,8 +81,13 @@ vec2 windAt(ivec2 c) {
 }
 
 void main() {
-  ivec2 c = ivec2(gl_FragCoord.xy);
-  vec4 s = texelFetch(uState, c, 0);
+  ivec2 a = ivec2(gl_FragCoord.xy); // 图集坐标
+  ivec2 tile = a / uSize;
+  ivec2 c = a - tile * uSize;       // 本块内的格子坐标
+  ivec2 o = tile * uSize;
+  uint tileId = uint(tile.y * uTiles.x + tile.x);
+  uint seed = uSeed + tileId * 7919u;
+  vec4 s = texelFetch(uState, a, 0);
   vec4 g = texelFetch(uGrid, c, 0);
 
   if (s.r > 1.5) { pc_fragColor = s; return; }
@@ -93,6 +105,12 @@ void main() {
   if (g.a < 0.5) { pc_fragColor = s; return; }
 
   vec2 wind = windAt(c);
+  if (tileId > 0u) {
+    // 成员的风扰动只取决于块号，整个模拟过程中保持不变
+    float ang = (rand(ivec2(0), tileId, 0x51ed27u, 1u) * 2.0 - 1.0) * uDirJitter;
+    float mag = 1.0 + (rand(ivec2(0), tileId, 0x51ed27u, 2u) * 2.0 - 1.0) * uSpeedJitter;
+    wind = mag * vec2(wind.x * cos(ang) - wind.y * sin(ang), wind.x * sin(ang) + wind.y * cos(ang));
+  }
   float V = length(wind);
   vec2 wdir = V > 1e-4 ? wind / V : vec2(0.0);
 
@@ -110,7 +128,8 @@ void main() {
         if (dx == 0 && dy == 0) continue;
         ivec2 n = c + ivec2(dx, dy);
         if (n.x < 0 || n.y < 0 || n.x >= uSize.x || n.y >= uSize.y) continue;
-        if (texelFetch(uState, n, 0).r < 0.5 || texelFetch(uState, n, 0).r > 1.5) continue;
+        float nr = texelFetch(uState, o + n, 0).r;
+        if (nr < 0.5 || nr > 1.5) continue;
         vec2 dir = normalize(vec2(-dx, -dy)); // 从邻格指向本格
         bool diag = dx != 0 && dy != 0;
         float dist = uCellSize * (diag ? 1.41421356 : 1.0);
@@ -131,9 +150,9 @@ void main() {
     float susceptibility = (g.a > 1.5 ? 2.5 * (0.5 + g.b) * (treat == 4 ? uZone0Mul : 1.0) : g.g * (0.5 + g.b)) * treatMul;
     for (int k = 0; k < 8; k++) {
       if (k >= uSpotSamples) break;
-      float u1 = max(rand(c, uStep, uSeed, uint(10 + k * 3)), 1e-6);
-      float u2 = rand(c, uStep, uSeed, uint(11 + k * 3));
-      float u3 = rand(c, uStep, uSeed, uint(12 + k * 3));
+      float u1 = max(rand(c, uStep, seed, uint(10 + k * 3)), 1e-6);
+      float u2 = rand(c, uStep, seed, uint(11 + k * 3));
+      float u3 = rand(c, uStep, seed, uint(12 + k * 3));
       // 对数正态：sigma = 0.6，均值约为 meanDist
       float z = sqrt(-2.0 * log(u1)) * cos(6.2831853 * u2);
       float d = meanDist * exp(0.6 * z - 0.18);
@@ -141,12 +160,12 @@ void main() {
       vec2 back = -vec2(wdir.x * cos(jitter) - wdir.y * sin(jitter), wdir.x * sin(jitter) + wdir.y * cos(jitter));
       ivec2 src = c + ivec2(round(back * d / uCellSize));
       if (src.x < 0 || src.y < 0 || src.x >= uSize.x || src.y >= uSize.y || src == c) continue;
-      float sr = texelFetch(uState, src, 0).r;
+      float sr = texelFetch(uState, o + src, 0).r;
       if (sr > 0.5 && sr < 1.5) notIgnite *= 1.0 - clamp(uSpotBase * susceptibility, 0.0, 1.0);
     }
   }
 
-  if (rand(c, uStep, uSeed, 0u) < 1.0 - notIgnite) {
+  if (rand(c, uStep, seed, 0u) < 1.0 - notIgnite) {
     s.r = 1.0;
     s.g = 0.0;
     s.b = float(uStep + 1u) * uStepMinutes;
@@ -179,5 +198,61 @@ export const resetFragment = /* glsl */ `
 ${common}
 void main() {
   pc_fragColor = vec4(0.0, 0.0, -1.0, 0.0);
+}
+`;
+
+/** 集合预报的初值：把全分辨率的模拟状态按 2×2 降采样，复制到图集的每一块。
+ *  块内有燃烧格则为燃烧中，否则有燃尽格则为燃尽；着火时刻记为 0（预报从此刻起算） */
+export const ensembleInitFragment = /* glsl */ `
+${common}
+uniform sampler2D uSrc;
+uniform ivec2 uSize;
+uniform int uFactor;
+
+void main() {
+  ivec2 a = ivec2(gl_FragCoord.xy);
+  ivec2 c = a - (a / uSize) * uSize;
+  bool burning = false;
+  bool burned = false;
+  for (int j = 0; j < uFactor; j++)
+    for (int i = 0; i < uFactor; i++) {
+      float r = texelFetch(uSrc, c * uFactor + ivec2(i, j), 0).r;
+      burning = burning || (r > 0.5 && r < 1.5);
+      burned = burned || r > 1.5;
+    }
+  pc_fragColor = burning ? vec4(1.0, 0.0, 0.0, 0.0) : burned ? vec4(2.0, 0.0, 0.0, 0.0) : vec4(0.0, 0.0, -1.0, 0.0);
+}
+`;
+
+/** 集合统计：对每个格子收集各成员的着火时刻并排序，输出
+ *  R 燃烧概率，G 第 10 百分位着火时刻（最早的可能），B 中位数，A 第 90 百分位；对应分位上未着火时为 -1 */
+export const ensembleReduceFragment = (members: number) => /* glsl */ `
+${common}
+uniform sampler2D uAtlas;
+uniform ivec2 uSize;
+uniform ivec2 uTiles;
+const int M = ${members};
+
+void main() {
+  ivec2 c = ivec2(gl_FragCoord.xy);
+  float t[M];
+  int burned = 0;
+  for (int k = 0; k < M; k++) {
+    ivec2 tile = ivec2(k % uTiles.x, k / uTiles.x);
+    vec4 s = texelFetch(uAtlas, tile * uSize + c, 0);
+    float v = s.r > 0.5 ? max(s.b, 0.0) : 1e9;
+    if (s.r > 0.5) burned++;
+    // 插入排序
+    int j = k - 1;
+    while (j >= 0 && t[j] > v) {
+      t[j + 1] = t[j];
+      j--;
+    }
+    t[j + 1] = v;
+  }
+  float p10 = t[M / 10];
+  float p50 = t[M / 2 - 1];
+  float p90 = t[(M * 9) / 10 - 1];
+  pc_fragColor = vec4(float(burned) / float(M), p10 < 1e8 ? p10 : -1.0, p50 < 1e8 ? p50 : -1.0, p90 < 1e8 ? p90 : -1.0);
 }
 `;
