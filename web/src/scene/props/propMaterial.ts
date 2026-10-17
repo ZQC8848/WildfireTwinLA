@@ -18,6 +18,9 @@ uniform float uTime;
 uniform float uSway;
 uniform sampler2D uState;
 uniform bool uUseState;
+uniform float uViewMinutes; // 显示时刻（分钟）
+uniform bool uViewLive;     // 是否显示当前时刻（而不是回看）
+uniform float uStepMinutes;
 uniform sampler2D uTreat; // 处理掩膜（同地形）
 uniform bool uHasTreat;
 uniform vec2 uGridSize;
@@ -37,7 +40,11 @@ float stateAt(float cell, vec2 xz) {
   if (uUseState) {
     int c = int(cell + 0.5);
     int w = int(uGridSize.x);
-    return texelFetch(uState, ivec2(c % w, c / w), 0).r;
+    vec4 st = texelFetch(uState, ivec2(c % w, c / w), 0);
+    // 时间轴回看：显示时刻之后才着火的格子当作未燃；回看时按着火后经过的时间近似燃烧中 / 已燃尽
+    if (st.r < 0.5 || st.b > uViewMinutes + 1e-3) return 0.0;
+    if (uViewLive) return st.r;
+    return uViewMinutes - st.b < 3.0 * uStepMinutes ? 1.0 : 2.0;
   }
   if (uBurnOn) {
     float d = length(xz - uBurn.xy);
@@ -150,6 +157,9 @@ export function createPropMaterial(gridSize: THREE.Vector2, minElev: number, vSc
         uSway: { value: 1 },
         uState: { value: null },
         uUseState: { value: false },
+        uViewMinutes: { value: 0 },
+        uViewLive: { value: true },
+        uStepMinutes: { value: 5 },
         uTreat: { value: null },
         uHasTreat: { value: false },
         uGridSize: { value: gridSize },

@@ -419,7 +419,7 @@ body[data-mode="respond"] .rail [data-mode-only="respond"] {
 .map-corner {
   position: fixed;
   right: 16px;
-  bottom: calc(var(--bottombar-h) + 16px);
+  bottom: calc(var(--bottombar-h) + 30px);
   z-index: 15;
   display: flex;
   flex-direction: column;
@@ -741,4 +741,92 @@ body.painting #app canvas {
 
 .metrics dd.ember {
   color: var(--ember);
+}
+
+/* ---- 时间轴：贴在底栏上沿、横跨整个地图宽度的进度条 ---- */
+.timeline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.timeline .elapsed {
+  min-width: 132px;
+  white-space: nowrap;
+}
+
+.timeline .elapsed.viewing {
+  color: var(--ink-muted);
+}
+
+.timeline-track {
+  position: fixed;
+  left: var(--rail-w);
+  right: 0;
+  bottom: var(--bottombar-h);
+  height: 22px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  z-index: 12;
+  background: linear-gradient(to top, color-mix(in srgb, var(--surface) 85%, transparent), transparent);
+}
+
+.timeline-track:has(.timeline-range:disabled) {
+  display: none;
+}
+
+.timeline-range {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--ember);
+}
+
+.timeline-ticks {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  top: 0;
+  height: 6px;
+  pointer-events: none;
+}
+
+.timeline-ticks i {
+  position: absolute;
+  width: 2px;
+  height: 6px;
+  margin-left: -1px;
+  background: var(--ink-muted);
+  opacity: 0.6;
+}
+
+.timeline-ticks i[data-level="warning"],
+.timeline-ticks i[data-level="reached"] {
+  background: var(--ember);
+  opacity: 1;
+}
+
+.bar-spacer {
+  flex: 1;
+}
+
+.btn-small {
+  height: 28px;
+  padding: 0 10px;
+}
+
+/* ---- 相机预设 ---- */
+.view-card {
+  padding: 6px;
+}
+
+.view-presets button {
+  padding: 0 10px;
+  font-size: var(--t-13);
+  white-space: nowrap;
+}
+
+.view-presets button:disabled {
+  opacity: 0.4;
+  cursor: default;
 }

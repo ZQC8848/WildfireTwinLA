@@ -67,7 +67,7 @@ uniform float uNight; // 0 白天（Plan）到 1 夜间（Respond）
 uniform sampler2D uWater; // R 河岸有向距离（米），G 路缘有向距离（米），BA 水流方向
 uniform vec3 uSkyColor;   // 水面反射的天空颜色，随模式变化
 uniform float uWaterTime;
-uniform float uSimMinutes; // 当前模拟时间（分钟）
+uniform float uSimMinutes; // 显示时刻（分钟）：通常是当前模拟时间，拖动时间轴时是回看的时刻
 uniform sampler2D uTreat; // 处理掩膜：R × 255 = 0 无，1 防火带，2 计划烧除，3 疏伐，4 Zone 0
 uniform bool uHasTreat;
 uniform vec3 uRetardant;
@@ -273,7 +273,8 @@ void main() {
         ivec2 cc = clamp(c0 + ivec2(i, j), ivec2(0), ivec2(uGridSize) - 1);
         vec4 st = texelFetch(uState, cc, 0);
         float wgt = (i == 1 ? f.x : 1.0 - f.x) * (j == 1 ? f.y : 1.0 - f.y);
-        bool lit = st.r > 0.5;
+        // 时间轴回看：着火时刻晚于显示时刻 T 的格子当作未燃
+        bool lit = st.r > 0.5 && st.b <= T + 1e-3;
         front += wgt * (lit ? max(st.b, T - 2.0 * S) : T + 2.0 * S);
         arr += wgt * (lit ? st.b : T);
       }
