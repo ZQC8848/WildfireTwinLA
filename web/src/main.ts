@@ -24,6 +24,9 @@ import { Shell, compassName, type Mode } from "./ui/shell";
 import { PlannerController } from "./planner/controller";
 import { HotspotMarkers } from "./scene/hotspots";
 import { RealtimeController } from "./realtime/controller";
+import { Bloom } from "./scene/post";
+import { CameraRig } from "./scene/cameraRig";
+import { cellXY } from "@core";
 
 const q = new URLSearchParams(location.search);
 const debug = q.has("debug");
@@ -89,6 +92,67 @@ const windLayer = new WindLayer(grid, terrain.minElev, terrain.verticalScale);
 ctx.scene.add(windLayer.object);
 const monitor = new FireMonitor(grid, bundle.communities, bundle.buildings);
 
+// ---- Bloom 与相机预设 ----
+const bloom = new Bloom(ctx);
+const rig = new CameraRig(ctx.camera, ctx.controls);
+ctx.onFrame((dt) => rig.update(dt));
+
+/** 格子集合的中心（世界坐标，地面高度按竖向夸张） */
+function cellsCenter(cells: number[]): THREE.Vector3 | null {
+  if (!cells.length) return null;
+  let sx = 0;
+  let sy = 0;
+  let se = 0;
+  for (const c of cells) {
+    const [x, y] = cellXY(meta, c);
+    sx += x;
+    sy += y;
+    se += grid.data[c * GRID_CHANNELS];
+  }
+  const n = cells.length;
+  return new THREE.Vector3(
+    (sx / n - (meta.width - 1) / 2) * meta.cellSize,
+    (se / n - terrain.minElev) * terrain.verticalScale,
+    (sy / n - (meta.height - 1) / 2) * meta.cellSize,
+  );
+}
+
+function flyToView(view: "overview" | "fire" | "community") {
+  if (view === "overview") {
+    rig.flyTo(new THREE.Vector3(0, 9000, 11000), new THREE.Vector3(0, 600, 0));
+    return;
+  }
+  if (view === "fire") {
+    // 火头：燃烧格中最靠下风的一段的中心；从下风方向斜上方看过去，火线与烟都朝向镜头
+    const cells = sim.burningSample.length ? sim.burningSample : testIgnitions;
+    if (!cells.length) return;
+    const [ux, uy] = windToGrid(inflow());
+    const len = Math.hypot(ux, uy) || 1;
+    const proj = cells.map((c) => ({ c, p: ((c % meta.width) * ux + Math.floor(c / meta.width) * uy) / len })).sort((a, b) => b.p - a.p);
+    const head = proj.slice(0, Math.max(1, Math.ceil(proj.length * 0.15))).map((o) => o.c);
+    const target = cellsCenter(head)!;
+    // 从风向的侧面、偏上风一点的高处看：烟往下风飘，不会挡住镜头，火线、烟柱走向与前方社区都在画面里
+    const down = new THREE.Vector3(ux / len, 0, uy / len);
+    const side = new THREE.Vector3(-down.z, 0, down.x);
+    rig.flyTo(target.clone().addScaledVector(side, 3400).addScaledVector(down, -900).add(new THREE.Vector3(0, 3000, 0)), target.clone().addScaledVector(down, 600));
+    return;
+  }
+  // 社区：最紧迫的社区（没有火时取第一个），从南侧斜上方看
+  const closest = monitor.closest();
+  const comm = bundle.communities.find((c) => c.id === closest?.id) ?? bundle.communities[0];
+  if (!comm) return;
+  const target = cellsCenter(comm.cells.filter((_, i) => i % 7 === 0))!;
+  rig.flyTo(target.clone().add(new THREE.Vector3(600, 1100, 1700)), target);
+}
+
+// ---- 时间轴：显示时刻（null 表示当前时刻） ----
+let viewMinutes: number | null = null;
+let smokeEnabled = true;
+function goLive() {
+  viewMinutes = null;
+  smoke.object.visible = smokeEnabled;
+}
+
 // 实时数据推送的 5×5 风场：均匀风模式下直接使用；地形风模式下取其平均作为来流
 let feedField: WindField | null = null;
 const applyWind = () => {
@@ -116,11 +180,13 @@ const shell = new Shell(
     onMode: (mode) => setMode(mode),
     onRunToggle: () => {
       if (!simActive) return;
+      goLive();
       simParams.running = !simParams.running;
       shell.setRunning(simParams.running);
     },
     onStep: () => {
       if (!simActive) return;
+      goLive();
       sim.advance(1);
     },
     onReset: () => resetSim(),
@@ -145,7 +211,21 @@ const shell = new Shell(
     onShowPlan: (key) => planner.show(key),
     onFeed: (mode) => realtime.start(mode),
     onShowSmoke: (show) => {
-      smoke.object.visible = show;
+      smokeEnabled = show;
+      smoke.object.visible = show && viewMinutes === null;
+    },
+    onScrub: (minutes) => {
+      // 拖动时间轴：暂停模拟，回看任意时刻；烟雾只属于当前时刻，回看时隐藏
+      viewMinutes = minutes >= sim.minutes ? null : minutes;
+      simParams.running = false;
+      shell.setRunning(false);
+      smoke.object.visible = smokeEnabled && viewMinutes === null;
+      refreshPanels();
+    },
+    onView: (view) => flyToView(view),
+    onNow: () => {
+      goLive();
+      refreshPanels();
     },
     onShowWind: (show) => {
       simParams.showWind = show;
@@ -187,6 +267,7 @@ window.dispatchEvent(new Event("resize"));
 
 const resetSim = () => {
   sim.reset();
+  goLive();
   testIgnitions = [];
   headPrev = null;
   frontSpeed = 0;
@@ -211,6 +292,7 @@ const applyNight = (v: number) => {
   sceneBg.copy(PLAN_BG).lerp(RESPOND_BG, v);
   fog.color.copy(sceneBg);
   (terrain.uniforms.uSkyColor.value as THREE.Color).copy(sceneBg);
+  bloom.setNight(v);
 };
 function setMode(mode: Mode) {
   shell.setMode(mode);
@@ -380,7 +462,11 @@ ctx.onFrame((dt) => {
   // 每步之后状态纹理会换成另一张，所以每帧都重新指向当前那张
   propMaterial.uniforms.uState.value = sim.texture;
   terrain.uniforms.uState.value = sim.texture;
-  terrain.uniforms.uSimMinutes.value = sim.minutes;
+  const shownMinutes = viewMinutes ?? sim.minutes;
+  terrain.uniforms.uSimMinutes.value = shownMinutes;
+  propMaterial.uniforms.uViewMinutes.value = shownMinutes;
+  propMaterial.uniforms.uViewLive.value = viewMinutes === null;
+  propMaterial.uniforms.uStepMinutes.value = SpreadParams.stepMinutes;
   terrain.uniforms.uStepMinutes.value = SpreadParams.stepMinutes;
   props.update(ctx.camera);
   smoke.update(dt, propMaterial.uniforms.uTime.value);
@@ -405,6 +491,13 @@ ctx.onFrame((dt) => {
 
 function refreshPanels() {
   shell.setElapsed(simActive ? sim.minutes : null);
+  shell.setViewAvailable(simActive && (sim.burningSample.length > 0 || testIgnitions.length > 0));
+  shell.setTimeline(
+    simActive ? sim.minutes : null,
+    viewMinutes ?? sim.minutes,
+    viewMinutes === null,
+    monitor.events.map((e) => ({ minutes: e.minutes, level: e.level })),
+  );
   const reached = monitor.communities.filter((c) => c.level === "reached").length;
   const fs = simActive ? sim.stats() : null;
   shell.setPlanFire(
@@ -532,6 +625,7 @@ if (debug) {
 // ---- 调试 URL 参数 ----
 // ?cam=x,y,z,tx,ty,tz 相机；?mode=respond 模式；?windmode=uniform|terrain；?wind=速度,来向；
 // ?ignite=x,y&steps=N 点火并推进；?cpucheck=N CPU 对照；?burn=半径 燃烧预览
+// ?view=overview|fire|community 加载后切换到相机预设（直接跳转，便于截图）
 const camQ = q.get("cam")?.split(",").map(Number);
 if (camQ?.length === 6 && camQ.every(Number.isFinite)) {
   ctx.camera.position.set(camQ[0], camQ[1], camQ[2]);
@@ -585,6 +679,12 @@ if (paintQ && paintQ.length >= 5) {
   planner.commitEdit();
 }
 if (q.has("suggest")) planner.suggest();
+const viewQ = q.get("view");
+if (viewQ === "overview" || viewQ === "fire" || viewQ === "community") {
+  flyToView(viewQ);
+  rig.update(10);
+}
+if (q.has("bloom") && q.get("bloom") === "0") bloom.enabled = false;
 if (q.has("cpucheck")) runCpuCheck(Number(q.get("cpucheck")) || 80);
 const feedQ = q.get("feed");
 if (feedQ === "live" || feedQ === "replay") realtime.start(feedQ);

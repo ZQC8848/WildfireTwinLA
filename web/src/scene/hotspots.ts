@@ -63,7 +63,8 @@ export class HotspotMarkers {
       this.dummy.scale.set(14, height, 14);
       this.dummy.updateMatrix();
       this.object.setMatrixAt(i, this.dummy.matrix);
-      this.object.setColorAt(i, this.color.set(SOURCE_COLORS[h.source] ?? SOURCE_COLORS.VIIRS));
+      // 颜色乘以 2.5，亮度超过 1，经 Bloom 发光
+      this.object.setColorAt(i, this.color.set(SOURCE_COLORS[h.source] ?? SOURCE_COLORS.VIIRS).multiplyScalar(2.5));
     });
     this.object.count = this.items.length;
     this.object.instanceMatrix.needsUpdate = true;

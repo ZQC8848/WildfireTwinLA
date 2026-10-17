@@ -41,7 +41,14 @@ export interface ShellHandlers {
   onSuggest(): void;
   onShowPlan(key: PlanKey): void;
   onFeed(mode: "off" | "live" | "replay"): void;
+  /** 拖动时间轴到某一时刻（分钟） */
+  onScrub(minutes: number): void;
+  /** 回到当前时刻 */
+  onNow(): void;
+  onView(view: ViewPreset): void;
 }
+
+export type ViewPreset = "overview" | "fire" | "community";
 
 const fmtMoney = (v: number) => (v >= 1e6 ? `$${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `$${Math.round(v / 1e3)}k` : `$${Math.round(v)}`);
 
@@ -168,7 +175,14 @@ export class Shell {
         <input class="range speed-range" id="speed" type="range" min="1" max="10" step="1" aria-describedby="speed-label" />
         <span class="figure speed-label" id="speed-label"></span>
       </div>
-      <div class="bar-group"><span class="figure elapsed" id="elapsed">0 min</span></div>
+      <div class="timeline">
+        <span class="figure elapsed" id="elapsed">Not started</span>
+        <div class="timeline-track">
+          <div class="timeline-ticks" id="timeline-ticks" aria-hidden="true"></div>
+          <input class="timeline-range" id="timeline" type="range" min="0" max="0" step="5" value="0" aria-label="Simulation time" disabled />
+        </div>
+        <button class="btn btn-small" id="now" hidden>Now</button>
+      </div>
       <div class="bar-spacer"></div>
       <div class="bar-group">
         <label for="wind-dir">Wind from</label>
@@ -187,6 +201,11 @@ export class Shell {
     const corner = el("div", { class: "map-corner" });
     const layerOptions = (Object.keys(LAYERS) as LayerId[]).map((id) => `<option value="${id}">${LAYERS[id].label}</option>`).join("");
     corner.innerHTML = `
+      <div class="map-card view-card">
+        <div class="segmented view-presets" id="view-presets" role="group" aria-label="Camera view">
+          <button data-view="overview" title="Overview (1)">Overview</button><button data-view="fire" title="Fire front (2)">Fire front</button><button data-view="community" title="Closest community (3)">Community</button>
+        </div>
+      </div>
       <div class="map-card" id="layer-card">
         <div class="map-card-row"><label for="layer">Map layer</label><select class="select" id="layer">${layerOptions}</select></div>
       </div>
@@ -259,6 +278,20 @@ export class Shell {
       const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-feed]");
       if (b) this.handlers.onFeed(b.dataset.feed as "off" | "live" | "replay");
     });
+    this.q<HTMLDivElement>("#view-presets").addEventListener("click", (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-view]");
+      if (b) this.handlers.onView(b.dataset.view as ViewPreset);
+    });
+    // 快捷键 1 / 2 / 3：在输入框里打字时不触发
+    addEventListener("keydown", (e) => {
+      const tag = (document.activeElement as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const view = ({ "1": "overview", "2": "fire", "3": "community" } as Record<string, ViewPreset>)[e.key];
+      if (view) this.handlers.onView(view);
+    });
+    const timeline = this.q<HTMLInputElement>("#timeline");
+    timeline.addEventListener("input", () => this.handlers.onScrub(Number(timeline.value)));
+    this.q<HTMLButtonElement>("#now").addEventListener("click", () => this.handlers.onNow());
     this.setBrush(3);
     this.q<HTMLInputElement>("#show-smoke").addEventListener("change", (e) => this.handlers.onShowSmoke((e.target as HTMLInputElement).checked));
 
@@ -280,6 +313,12 @@ export class Shell {
   }
 
   // ---- 底栏 ----
+  /** 没有火时禁用"火头"视角 */
+  setViewAvailable(fire: boolean) {
+    const b = this.q<HTMLButtonElement>('#view-presets button[data-view="fire"]');
+    b.disabled = !fire;
+  }
+
   setRunning(running: boolean) {
     this.q<HTMLButtonElement>("#run").textContent = running ? "Pause" : "Run";
   }
@@ -311,6 +350,24 @@ export class Shell {
     this.q<HTMLDivElement>("#wind-model")
       .querySelectorAll<HTMLButtonElement>("button")
       .forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.model === model)));
+  }
+
+  /** 时间轴：max 为当前模拟时间，view 为显示时刻；ticks 为事件刻度 */
+  setTimeline(max: number | null, view: number, live: boolean, ticks: { minutes: number; level: string }[]) {
+    const range = this.q<HTMLInputElement>("#timeline");
+    range.disabled = !max;
+    range.max = String(max ?? 0);
+    if (document.activeElement !== range) range.value = String(live ? (max ?? 0) : view);
+    this.q<HTMLButtonElement>("#now").hidden = live;
+    const el = this.q<HTMLSpanElement>("#elapsed");
+    el.classList.toggle("viewing", !live);
+    if (max) el.textContent = `T + ${formatMinutes(live ? max : view)}`;
+    this.q<HTMLDivElement>("#timeline-ticks").innerHTML = max
+      ? ticks
+          .filter((t) => t.minutes <= max)
+          .map((t) => `<i data-level="${t.level}" style="left:${(t.minutes / max) * 100}%"></i>`)
+          .join("")
+      : "";
   }
 
   setElapsed(minutes: number | null) {
