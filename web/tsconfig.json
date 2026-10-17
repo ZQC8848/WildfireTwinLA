@@ -10,6 +10,7 @@
     "noUnusedParameters": true,
     "skipLibCheck": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "paths": { "@core": ["../packages/core/src/index.ts"] }
   },

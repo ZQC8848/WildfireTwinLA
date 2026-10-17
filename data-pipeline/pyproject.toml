@@ -1,0 +1,36 @@
+[project]
+name = "wildfire-twin-data-pipeline"
+version = "0.1.0"
+description = "Offline GIS preprocessing for WildfireTwinLA"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=2,<3",
+  "planetary-computer>=1,<2",
+  "pystac-client>=0.8,<1",
+  "rasterio>=1.4,<2",
+]
+
+[project.scripts]
+wildfire-grid = "wildfire_grid.cli:main"
+wildfire-sentinel = "wildfire_grid.sentinel:main"
+wildfire-communities = "wildfire_grid.communities:main"
+wildfire-source = "wildfire_grid.sources:main"
+wildfire-eaton-replay = "wildfire_grid.eaton:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["wildfire_grid*"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9", "ruff>=0.7,<1"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
