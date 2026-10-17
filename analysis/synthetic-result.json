@@ -1,1 +1,27 @@
-{"label":"SYNTHETIC TEST ONLY — NOT EATON", "arrivalSteps":[0,1,2,3,null],"calibrationDetections":[{"cell":1,"minutes":5},{"cell":2,"minutes":10}],"validationDetections":[{"cell":3,"minutes":17}],"perimeters":[{"minutes":10,"cells":[0,1,2]}],"gpuArrivalMinutes":[0,6,11,16,null]}
+{
+  "label": "SYNTHETIC TEST ONLY — NOT EATON",
+  "calibration": {
+    "stepMinutes": 5.0,
+    "detectionProxyMAEMinutes": 0.0,
+    "samplesUsed": 2,
+    "samplesExcluded": 0
+  },
+  "warning": "Detection times are delayed proxies; use temporally held-out observations and timestamp-matched perimeters.",
+  "heldOut": {
+    "stepMinutes": 5.0,
+    "detectionProxyMAEMinutes": 2.0,
+    "samplesUsed": 1,
+    "samplesExcluded": 0
+  },
+  "perimeters": [
+    {
+      "minutes": 10,
+      "iou": 1.0
+    }
+  ],
+  "cpuGpu": {
+    "pairedCells": 4,
+    "arrivalMAEMinutes": 0.75,
+    "reachabilityDisagreements": 0
+  }
+}
