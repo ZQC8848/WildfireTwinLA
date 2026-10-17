@@ -1,0 +1,17 @@
+{
+  "width": 512,
+  "height": 512,
+  "cellSize": 25.0,
+  "crs": "EPSG:32611",
+  "originUTM": [
+    433650.0,
+    3711650.0
+  ],
+  "bboxLonLat": [
+    -117.714,
+    33.427,
+    -117.576,
+    33.543
+  ],
+  "layout": "row-major, north-to-south, little-endian Float32 RGBA"
+}

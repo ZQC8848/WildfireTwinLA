@@ -5,7 +5,7 @@ import numpy as np
 from netCDF4 import Dataset
 from pyproj import CRS, Transformer
 
-from app.providers.firms import FirmsProvider, parse_firms_csv
+from app.providers.firms import FirmsProvider, is_static_heat_source, parse_firms_csv
 from app.providers.goes import GoesProvider, decode_fdcc
 from app.providers.official import parse_cap_feed
 from app.providers.weather import sampling_grid
@@ -79,8 +79,17 @@ def test_goes_product_maps_to_goes_source() -> None:
 def test_weather_sampling_grid_is_five_by_five() -> None:
     points = sampling_grid((-118.2, 34.17, -118.06, 34.27))
     assert len(points) == 25
-    assert points[0] == (34.17, -118.2)
-    assert points[-1] == (34.27, -118.06)
+    assert points[0] == (34.27, -118.2)
+    assert points[-1] == (34.17, -118.06)
+
+
+def test_prima_deshecha_landfill_is_filtered() -> None:
+    payload = (
+        "latitude,longitude,acq_date,acq_time,satellite,confidence,frp\n"
+        "33.4905,-117.6185,2026-10-16,0926,N,h,1.0\n"
+    )
+    hotspot = parse_firms_csv(payload, "VIIRS_SNPP_NRT")[0]
+    assert is_static_heat_source(hotspot)
 
 
 def test_cap_alert_is_normalized_as_official_order() -> None:

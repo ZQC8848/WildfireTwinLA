@@ -64,7 +64,12 @@ def incident_message(incident: Incident) -> dict:
 def wind_message(snapshot: WindSnapshot) -> dict:
     return {
         "t": snapshot.observed_at.isoformat(),
-        "grid5x5": [[point.speed_ms, point.direction_from_deg] for point in snapshot.points],
+        "width": 5,
+        "height": 5,
+        "samples": [
+            {"speedMs": point.speed_ms, "dirFromDeg": point.direction_from_deg}
+            for point in snapshot.points
+        ],
     }
 
 

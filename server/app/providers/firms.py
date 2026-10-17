@@ -17,6 +17,28 @@ DEFAULT_SOURCES = (
     "GOES_NRT",
 )
 logger = logging.getLogger(__name__)
+STATIC_HEAT_SOURCES = ((33.4905, -117.6185, 750.0),)
+
+
+def _distance_m(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> float:
+    from math import asin, cos, radians, sin, sqrt
+
+    radius = 6_371_000.0
+    delta_lat = radians(lat_b - lat_a)
+    delta_lon = radians(lon_b - lon_a)
+    a = (
+        sin(delta_lat / 2) ** 2
+        + cos(radians(lat_a)) * cos(radians(lat_b)) * sin(delta_lon / 2) ** 2
+    )
+    return 2 * radius * asin(sqrt(a))
+
+
+def is_static_heat_source(hotspot: Hotspot) -> bool:
+    """Return true for known persistent non-wildfire heat sources in this AOI."""
+    return any(
+        _distance_m(hotspot.lat, hotspot.lon, lat, lon) <= radius_m
+        for lat, lon, radius_m in STATIC_HEAT_SOURCES
+    )
 
 
 def _confidence(value: str) -> float:

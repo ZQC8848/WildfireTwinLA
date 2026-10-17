@@ -8,7 +8,7 @@
 |---|---|---|---|
 | **A：3D 与 GPU 模拟** | Qinchuan | Three.js 场景与渲染、GPU 元胞自动机、64 路集合预报、时间轴、画防火带的笔刷交互、方案对比界面 | 图形、shader、前端 |
 | **B：数据与实时后端** | Tia | 离线数据预处理（DEM、Sentinel-2、建筑统一成网格）；FIRMS、GOES、风况轮询；火点聚类；WebSocket 推送；告警规则；Retell 外呼与住户登记 | Python GIS、Node 或 Python 后端 |
-| **C：防控算法与验证** | Lucia | ROS 蔓延速率模型、Dijkstra 到达时间、路径流量、贪心优化、最小割基线、方案评估指标；Eaton 回放验证（IoU、Δt 标定） | 算法；土木或环境工程背景更佳 |
+| **C：防控算法与验证** | Lucia | ROS 蔓延速率模型、Dijkstra 到达时间、路径流量、贪心优化、最小割基线、方案评估指标；Norte 回放验证（IoU、Δt 标定） | 算法；土木或环境工程背景更佳 |
 
 关键的边界划分：
 
@@ -27,7 +27,7 @@ WildfireTwinLA/
 │   ├── src/params.ts     共有  蔓延模型参数，C 维护数值，A 读成 shader uniform
 │   └── src/worker.ts     C    Web Worker 入口
 ├── web/                  A    Vite + Three.js 前端
-├── analysis/             C    Python：Eaton 回放验证、Δt 标定
+├── analysis/             C    Python：Norte 回放验证、Δt 标定
 └── public/data/          B    生成的网格数据（产物）
 ```
 
@@ -66,7 +66,7 @@ interface GridMeta {
 export const SpreadParams = {
   ph: 0.58, c1: 0.045, c2: 0.131, a: 0.078,          // Alexandridis et al. 2008
   spot: { pBase: 0.02, distMeanPerWindMs: 40, samples: 4 },
-  stepMinutes: 5,                                     // C 用 Eaton 回放标定后更新
+  stepMinutes: 5,                                     // C 用 Norte 回放标定后更新
 };
 export const TreatmentEffect = {
   break: { fuelMul: 0.05 },
@@ -105,14 +105,15 @@ interface Metrics { buildingsThreatened: number; burnedAreaHa: number; cost: num
 
 ```ts
 type ServerMsg =
-  | { type: "hotspots"; items: { id: string; cell: number; lon: number; lat: number; t: string; frp: number; conf: number; source: "VIIRS" | "MODIS" | "GOES" }[] }
+  | { type: "hotspots"; items: { id: string; cell: number; lon: number; lat: number; t: string; frp: number; conf: number; source: "REPORT" | "VIIRS" | "MODIS" | "GOES" }[] }
   | { type: "incident"; id: string; hotspotIds: string[]; perimeterCells?: number[] }
-  | { type: "wind"; t: string; grid5x5: [speedMs: number, dirFromDeg: number][] }
+  | { type: "wind"; t: string; width: 5; height: 5; samples: { speedMs: number; dirFromDeg: number }[] }
   | { type: "alert"; communityId: string; level: "watch" | "warning" | "imminent"; etaMin: number }
   | { type: "call_status"; buildingId: string; status: "confirmed" | "no_answer" | "needs_help" };
 ```
 
-服务器提供 `?mode=live` 和 `?mode=replay&event=eaton` 两种模式，前端代码不区分。
+服务器提供 `?mode=live` 和 `?mode=replay&event=norte` 两种主要模式；省略 replay 的
+`event` 时默认 Norte，`event=eaton` 作为旧演示兼容保留。风场数组始终按从北到南、从西到东的行主序排列。
 
 ## 四、用假数据解耦
 
@@ -140,5 +141,5 @@ type ServerMsg =
 | 讲者 | 内容 |
 |---|---|
 | B | 数据来源与 dual-use 商业故事：平日谁付钱，危机时怎么转发和告警 |
-| A | 3D 场景与 GPU 集合预报，现场操作 Eaton 回放 |
+| A | 3D 场景与 GPU 集合预报，现场操作 Norte 回放 |
 | C | 防控算法：现场画一条防火带并与算法方案对比；拉风速滑块，展示飞火跳过防火带后预算转向房屋硬化 |

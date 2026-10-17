@@ -2,16 +2,18 @@
 
 ## 为什么需要
 
-研究区横跨 San Gabriel 山脉南麓前缘：Altadena 海拔约 350–600 m，北面约 5 km 就是 Mount Wilson 一线（约 1,740 m）的山脊，中间切着 Eaton Canyon、Arroyo Seco 等峡谷。在这个尺度上，地形会显著改变风：
+当前研究区位于 San Juan Capistrano / San Clemente 的海岸丘陵。Santa Ana 风越过山脊、
+沟谷和城市边缘时会发生加速、遮蔽和导流；在 12.8 km 的模拟域内不能只用一个均匀风向量。
 
 | 效应 | 位置 | 量级 |
 |---|---|---|
-| 下坡风暴（背风波） | 北风 / Santa Ana 越过山脊后沿南坡下冲，山脚最强 | 山脚风速可达来流的 1.5–2 倍以上 |
+| 下坡风与背风加速 | Santa Ana 越过海岸丘陵后的背风坡 | 局地高于区域平均来流 |
 | 峡谷导流 | 南北向峡谷 | 风向被扭向峡谷走向，偏转 30–90° |
 | 山脊加速 | 山脊、山嘴 | 约 1.3–2 倍 |
 | 背风遮蔽 | 山脊背后的小山谷 | 约 0.3–0.6 倍，可能局部逆向 |
 
-蔓延规则中风的作用是指数形式，飞火距离也与风速成正比，所以单一风向会系统性地低估山脚（社区所在处）的火势。2025 年 1 月 Eaton 火灾正是由沿南坡下冲的强东北风推进 Altadena 的。
+蔓延规则中风的作用是指数形式，飞火距离也与风速成正比，所以单一风向会系统性地低估
+丘陵背风坡和沟谷出口附近的火势。Norte 事件中的 ENE Santa Ana 来流正是需要离线地形修正的主情景。
 
 ## 数据流
 
@@ -53,7 +55,7 @@ WindNinja 风场库（离线预算，按来流风向 × 风速）──► 前�
 
 **输出文件**（放在 `web/public/data/wind/`，该目录已被 git 忽略）
 
-`index.json`：
+`index.json`（已生成并提交）：
 
 ```json
 {
@@ -62,7 +64,7 @@ WindNinja 风场库（离线预算，按来流风向 × 风速）──► 前�
   "directions": [0, 22.5, 45, 67.5, 90, 112.5, 135, 157.5, 180, 202.5, 225, 247.5, 270, 292.5, 315, 337.5],
   "speeds": [5, 12, 20],
   "file": "wind-library.bin",
-  "source": "WindNinja 3.x, mass-conserving, 100 m"
+  "source": "WindNinja mass-conserving C API, brush, 10 m, resampled to 100 m"
 }
 ```
 
@@ -89,10 +91,12 @@ WindNinja 风场库（离线预算，按来流风向 × 风速）──► 前�
   - 山谷中把风向扭向等高线方向（峡谷导流）。
 - 界面：调试面板 **Fire simulation → Wind model** 切换 "Uniform" 与 "Terrain-adjusted"；**Show wind field** 显示风场箭头（Marine 色，减弱处更暗，加速处更亮）。
 
-## 后端实时风的顺序问题（待修正）
+## 后端实时风的顺序问题（已修正）
 
-`server/app/providers/weather.py` 的 `sampling_grid` 生成的 5×5 采样点是**由南向北**排列的（第 0 行在最南），而 core 的 `WindField` 约定是**由北向南**。直接把后端的风交给模拟，南北会颠倒。另外，`contracts.wind_message` 仍在输出旧格式 `grid5x5`，而 core 的 `WindField` 已改为 `{ width, height, samples: [{ speedMs, dirFromDeg }] }`。建议后端：
+`server/app/providers/weather.py` 现在从北界开始生成 5×5 采样点，
+`contracts.wind_message` 直接输出 core 的 `{ width, height, samples }` 格式。测试同时断言
+首点纬度等于 bbox 北界，并验证 0° 北风转换后的 north 分量为负值。
 
-1. `sampling_grid` 改为由北向南（`north - row * (north - south) / (size - 1)`）；
-2. `wind_message` 改为输出 `{ "width": 5, "height": 5, "samples": [{ "speedMs": …, "dirFromDeg": … }, …] }`，并同步 `docs/team-plan.md` 约定 4；
-3. 加一个测试：第一个采样点的纬度等于 bbox 的北界。
+离线库由 `wildfire-wind-library` 可重复生成。它执行 48 个真实 WindNinja
+domain-average 算例、将原生网格双线性重采样到 128×128、翻转为北到南行序并打包为
+little-endian Float32 east/north 分量。

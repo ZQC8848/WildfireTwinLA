@@ -229,13 +229,19 @@ async def websocket_endpoint(
     event: str | None = None,
     speed: float = 20,
 ) -> None:
-    if mode not in {"live", "replay"} or (mode == "replay" and event != "eaton"):
+    replay_event = event or "norte"
+    if mode not in {"live", "replay"} or (
+        mode == "replay" and replay_event not in {"norte", "eaton"}
+    ):
         await websocket.close(code=1008, reason="unsupported stream mode")
         return
     if mode == "replay":
         await websocket.accept()
+        replay_path = (
+            settings.replay_path if replay_event == "norte" else settings.eaton_replay_path
+        )
         try:
-            await stream_replay(websocket, settings.replay_path, speed)
+            await stream_replay(websocket, replay_path, speed)
         except FileNotFoundError:
             await websocket.send_json({"type": "error", "detail": "replay dataset unavailable"})
         finally:

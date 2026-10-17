@@ -25,7 +25,7 @@ def test_community_polygons_are_exported_as_grid_cells(tmp_path) -> None:
                     {
                         "type": "Feature",
                         "id": "altadena",
-                        "properties": {"name": "Altadena"},
+                        "properties": {"name": "Altadena", "approx": True},
                         "geometry": {
                             "type": "Polygon",
                             "coordinates": [
@@ -46,4 +46,5 @@ def test_community_polygons_are_exported_as_grid_cells(tmp_path) -> None:
     result = build_communities(str(grid), str(source))
     assert result[0]["id"] == "altadena"
     assert result[0]["name"] == "Altadena"
+    assert result[0]["approx"] is True
     assert result[0]["cells"]

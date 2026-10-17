@@ -1,0 +1,48 @@
+{
+  "type": "FeatureCollection",
+  "name": "Norte Fire approximate community areas",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "sjc04",
+      "properties": {"name": "San Juan Capistrano — Via La Mirada area (SJC04, approximate)", "approx": true},
+      "geometry": {"type": "Polygon", "coordinates": [[[-117.680,33.470],[-117.655,33.470],[-117.655,33.488],[-117.680,33.488],[-117.680,33.470]]]}
+    },
+    {
+      "type": "Feature",
+      "id": "sjc05",
+      "properties": {"name": "San Juan Capistrano — Avenida Calita area (SJC05, approximate)", "approx": true},
+      "geometry": {"type": "Polygon", "coordinates": [[[-117.690,33.480],[-117.668,33.480],[-117.668,33.500],[-117.690,33.500],[-117.690,33.480]]]}
+    },
+    {
+      "type": "Feature",
+      "id": "sjc10",
+      "properties": {"name": "San Juan Hills / Stallion Ridge (SJC10, approximate)", "approx": true},
+      "geometry": {"type": "Polygon", "coordinates": [[[-117.675,33.493],[-117.642,33.493],[-117.642,33.520],[-117.675,33.520],[-117.675,33.493]]]}
+    },
+    {
+      "type": "Feature",
+      "id": "scl12",
+      "properties": {"name": "North San Clemente (SCL12, approximate)", "approx": true},
+      "geometry": {"type": "Polygon", "coordinates": [[[-117.660,33.455],[-117.632,33.455],[-117.632,33.480],[-117.660,33.480],[-117.660,33.455]]]}
+    },
+    {
+      "type": "Feature",
+      "id": "scl13",
+      "properties": {"name": "Forster Ranch / east San Clemente (SCL13, approximate)", "approx": true},
+      "geometry": {"type": "Polygon", "coordinates": [[[-117.635,33.455],[-117.602,33.455],[-117.602,33.487],[-117.635,33.487],[-117.635,33.455]]]}
+    },
+    {
+      "type": "Feature",
+      "id": "ladera-ranch",
+      "properties": {"name": "Ladera Ranch (approximate)", "approx": true},
+      "geometry": {"type": "Polygon", "coordinates": [[[-117.660,33.525],[-117.625,33.525],[-117.625,33.543],[-117.660,33.543],[-117.660,33.525]]]}
+    },
+    {
+      "type": "Feature",
+      "id": "esencia",
+      "properties": {"name": "Rancho Mission Viejo — Esencia (approximate)", "approx": true},
+      "geometry": {"type": "Polygon", "coordinates": [[[-117.620,33.515],[-117.582,33.515],[-117.582,33.543],[-117.620,33.543],[-117.620,33.515]]]}
+    }
+  ]
+}

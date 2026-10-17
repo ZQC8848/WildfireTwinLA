@@ -31,13 +31,14 @@ def build_communities(grid_path: str, source_path: str) -> list[dict]:
             dtype="uint8",
         )
         properties = feature.get("properties", {})
-        communities.append(
-            {
-                "id": str(feature.get("id") or properties.get("id") or index),
-                "name": str(properties.get("name") or properties.get("NAME") or index),
-                "cells": np.flatnonzero(mask.reshape(-1)).tolist(),
-            }
-        )
+        community = {
+            "id": str(feature.get("id") or properties.get("id") or index),
+            "name": str(properties.get("name") or properties.get("NAME") or index),
+            "cells": np.flatnonzero(mask.reshape(-1)).tolist(),
+        }
+        if "approx" in properties:
+            community["approx"] = bool(properties["approx"])
+        communities.append(community)
     return communities
 
 

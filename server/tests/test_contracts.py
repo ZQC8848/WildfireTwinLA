@@ -19,7 +19,7 @@ def test_hotspot_contract_matches_frozen_team_shape() -> None:
     assert item["cell"] >= 0
 
 
-def test_wind_contract_uses_5x5_tuples() -> None:
+def test_wind_contract_uses_core_wind_field_shape() -> None:
     point = WindPoint(
         lat=34.2,
         lon=-118.1,
@@ -31,5 +31,7 @@ def test_wind_contract_uses_5x5_tuples() -> None:
     message = wind_message(
         WindSnapshot(observed_at=datetime(2026, 10, 16, tzinfo=UTC), points=[point] * 25)
     )
-    assert len(message["grid5x5"]) == 25
-    assert message["grid5x5"][0] == [10.0, 45.0]
+    assert message["width"] == 5
+    assert message["height"] == 5
+    assert len(message["samples"]) == 25
+    assert message["samples"][0] == {"speedMs": 10.0, "dirFromDeg": 45.0}

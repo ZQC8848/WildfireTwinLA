@@ -66,7 +66,7 @@ def test_health_registration_and_websocket_snapshot(tmp_path, monkeypatch) -> No
             assert snapshot["incidents"] == []
             websocket.send_text("ping")
             assert websocket.receive_text() == "pong"
-        with client.websocket_connect("/ws?mode=replay&event=eaton&speed=1000") as websocket:
+        with client.websocket_connect("/ws?mode=replay&event=norte&speed=100000") as websocket:
             replay = websocket.receive_json()
             assert replay["type"] == "snapshot"
-            assert replay["event"] == "eaton"
+            assert replay["event"] == "norte"

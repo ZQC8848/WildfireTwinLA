@@ -23,7 +23,9 @@ pytest -q
 Pollers default to disabled so local runs do not require external credentials. To enable the
 live backend, set `WILDFIRE_ENABLE_POLLERS=true` and provide a NASA FIRMS map key. FIRMS
 VIIRS/MODIS and GOES NRT are normalized to the same hotspot model; Open-Meteo provides a
-5×5 wind field. Set `WILDFIRE_ENABLE_DIRECT_GOES=true` to decode NOAA GOES-18
+5×5 north-to-south wind field. The default bbox and replay now target the Norte Fire; use
+`WS /ws?mode=replay` (or `event=norte`) for that dataset. Set
+`WILDFIRE_ENABLE_DIRECT_GOES=true` to decode NOAA GOES-18
 ABI-L2-FDCC NetCDF directly. Configure the three `WILDFIRE_RETELL_*` values to enable calls.
 
 Useful integration points:

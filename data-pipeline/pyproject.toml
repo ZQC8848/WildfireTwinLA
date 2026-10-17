@@ -16,6 +16,8 @@ wildfire-sentinel = "wildfire_grid.sentinel:main"
 wildfire-communities = "wildfire_grid.communities:main"
 wildfire-source = "wildfire_grid.sources:main"
 wildfire-eaton-replay = "wildfire_grid.eaton:main"
+wildfire-norte-replay = "wildfire_grid.norte:main"
+wildfire-wind-library = "wildfire_grid.wind_library:main"
 
 [build-system]
 requires = ["setuptools>=69"]

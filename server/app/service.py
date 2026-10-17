@@ -9,7 +9,7 @@ from .alerts import evaluate_alert
 from .clustering import cluster_hotspots, distance_m
 from .config import Settings
 from .contracts import hotspot_message, incident_message, official_order_message, wind_message
-from .providers.firms import DEFAULT_SOURCES, FirmsProvider
+from .providers.firms import DEFAULT_SOURCES, FirmsProvider, is_static_heat_source
 from .providers.goes import GoesProvider
 from .providers.official import OfficialOrderProvider
 from .providers.weather import WeatherProvider
@@ -102,7 +102,7 @@ class BackendService:
                 pass
 
     async def poll_hotspots(self) -> int:
-        hotspots = await self.firms.fetch()
+        hotspots = [item for item in await self.firms.fetch() if not is_static_heat_source(item)]
         inserted = self.store.upsert_hotspots(hotspots)
         self.store.record_provider_success(
             "firms", metadata={"fetched": len(hotspots), "new": len(inserted)}
@@ -131,6 +131,7 @@ class BackendService:
 
     async def poll_goes(self) -> int:
         object_key, hotspots = await self.goes.fetch()
+        hotspots = [item for item in hotspots if not is_static_heat_source(item)]
         inserted = self.store.upsert_hotspots(hotspots)
         self.store.record_provider_success(
             "goes-abi-fdcc",

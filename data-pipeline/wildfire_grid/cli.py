@@ -1,12 +1,13 @@
 import argparse
 import json
+import math
 from pathlib import Path
 
 import numpy as np
 import rasterio
 from rasterio.enums import Resampling
 from rasterio.features import rasterize
-from rasterio.transform import from_bounds, rowcol
+from rasterio.transform import Affine, rowcol
 from rasterio.vrt import WarpedVRT
 from rasterio.warp import transform_bounds, transform_geom
 
@@ -73,7 +74,7 @@ def load_buildings(path: str | None, crs: str, transform, shape: tuple[int, int]
         records.append(
             {
                 "id": str(feature.get("id") or feature.get("properties", {}).get("id") or index),
-                "cell": row * width + column,
+                "cell": int(row) * width + int(column),
                 "weight": feature.get("properties", {}).get("weight", 1),
                 "polygonLonLat": geometry,
             }
@@ -86,8 +87,16 @@ def build_grid(args: argparse.Namespace) -> None:
     west, south, east, north = args.bbox
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
-    bounds = transform_bounds("EPSG:4326", args.crs, west, south, east, north)
-    transform = from_bounds(*bounds, args.width, args.height)
+    left, bottom, right, top = transform_bounds("EPSG:4326", args.crs, west, south, east, north)
+    center_x = (left + right) / 2
+    center_y = (bottom + top) / 2
+    grid_left = (
+        math.floor((center_x - args.width * args.cell_size / 2) / args.cell_size) * args.cell_size
+    )
+    grid_top = (
+        math.ceil((center_y + args.height * args.cell_size / 2) / args.cell_size) * args.cell_size
+    )
+    transform = Affine(args.cell_size, 0, grid_left, 0, -args.cell_size, grid_top)
     read_options = {
         "crs": args.crs,
         "transform": transform,
@@ -161,6 +170,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--crs", default="EPSG:32611")
     result.add_argument("--width", type=int, default=512)
     result.add_argument("--height", type=int, default=512)
+    result.add_argument("--cell-size", type=float, default=25)
     result.add_argument("--output", required=True)
     return result
 

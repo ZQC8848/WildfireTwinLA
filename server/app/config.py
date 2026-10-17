@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     env: str = "development"
     database_path: str = "./wildfire.db"
-    bbox: tuple[float, float, float, float] = (-118.20, 34.17, -118.06, 34.27)
+    bbox: tuple[float, float, float, float] = (-117.714, 33.427, -117.576, 33.543)
     firms_map_key: str = ""
     enable_direct_goes: bool = False
     goes_satellite: str = "goes18"
@@ -29,7 +29,8 @@ class Settings(BaseSettings):
     grid_width: int = 512
     grid_height: int = 512
     grid_crs: str = "EPSG:32611"
-    replay_path: str = "./data/eaton-replay.jsonl"
+    replay_path: str = "./data/norte-replay.jsonl"
+    eaton_replay_path: str = "./data/eaton-replay.jsonl"
     registration_rate_limit: int = 10
 
     @field_validator("bbox", mode="before")

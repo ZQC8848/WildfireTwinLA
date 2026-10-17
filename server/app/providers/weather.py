@@ -13,7 +13,7 @@ def sampling_grid(
     west, south, east, north = bbox
     return [
         (
-            south + row * (north - south) / (size - 1),
+            north - row * (north - south) / (size - 1),
             west + column * (east - west) / (size - 1),
         )
         for row in range(size)

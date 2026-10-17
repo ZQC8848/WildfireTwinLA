@@ -1,22 +1,27 @@
 # Module B Delivery, Timeline, and README Compliance
 
-- Audit date: 2026-10-16
-- Audited revision: `2794ba1` on `b/data-realtime-backend`
+- Audit date: 2026-10-17
+- Audited branch: `b/backend`
 - Scope: Module B — data preprocessing and the realtime backend owned by Tia
 
 ## 1. Executive summary
 
-Module B now has a runnable offline GIS package and a runnable FastAPI service. The delivered code covers the main vertical path from source data to normalized hotspots, incidents, live messages, modeled alerts, resident consent, and Retell call state.
+Module B now has a real Norte grid, a reproducible 48-case WindNinja library, a public-data
+Norte replay, and a runnable FastAPI service. The delivered code covers the main vertical path
+from source data to normalized hotspots, incidents, live messages, modeled alerts, resident
+consent, and Retell call state.
 
-The hardening pass closed the main data and wire-contract gaps: the pipeline can download USGS DEM and OSM buildings, generate `communities.json`, use Sentinel B8A for NDMI, and build an Eaton perimeter replay; the server now emits the frozen WebSocket fields, decodes NOAA GOES-18 ABI-L2-FDCC directly, accepts batch risk results, polls CAP official-order feeds, and protects resident revocation with a secret token.
+The Norte pass uses a pre-fire 2026-10-14 Sentinel-2 scene, the 2026-09-15 USGS 1/3
+arc-second DEM, 50,408 OSM footprints, and seven explicitly approximate communities. The server
+now uses the Norte bbox, filters the Prima Deshecha landfill heat source, emits north-to-south
+core wind fields, and defaults replay connections to Norte while preserving Eaton compatibility.
 
 It is **not yet production-complete**. The remaining external or cross-module gaps are:
 
-1. the bundled Eaton file is a fast demonstration seed; the authoritative perimeter replay must be generated for the final grid, and a full time-series/IoU replay still depends on historical detection data;
-2. module C is connected through a tested batch API rather than being embedded in the Python process;
-3. Retell requires credentials and approved test numbers before its live path can be verified;
-4. an authoritative CAP feed URL and community mapping must be configured for deployment;
-5. PII encryption at rest and distributed rate limiting remain production tasks.
+1. WFIGS currently returns no Norte perimeter, so final IoU remains pending rather than using a fabricated boundary;
+2. Retell requires credentials and approved test numbers before its live path can be verified;
+3. an authoritative CAP feed URL must be configured for deployment;
+4. PII encryption at rest and distributed rate limiting remain production tasks.
 
 These gaps do not invalidate the current MVP, but they must be resolved before claiming full README compliance or plug-and-play integration with modules A and C.
 
@@ -93,23 +98,22 @@ gantt
     Contract and production hardening    :milestone, m6, 2026-10-16 21:05, 0m
 ```
 
-Recommended path from the current MVP to a README-compliant demo:
+Norte alignment completed on 17 October:
 
 ```mermaid
 gantt
-    title Recommended completion sequence
-    dateFormat  YYYY-MM-DD
-    axisFormat  %b %d
-    section Integration blockers
-    Freeze one WS schema and add contract tests :crit, c1, 2026-10-17, 1d
-    Implement real Eaton replay                 :crit, c2, after c1, 1d
-    Connect C arrival output to alert input      :crit, c3, 2026-10-17, 1d
-    section Data completeness
-    Add communities and source download commands: d1, 2026-10-17, 1d
-    Add direct NOAA GOES ABI FDC adapter         : d2, 2026-10-18, 1d
-    section Safety and production
-    Add official-order ingestion and UI flag    :crit, s1, 2026-10-18, 1d
-    Add auth, rate limits, encryption, metrics   : s2, after s1, 2d
+    title Norte data and backend alignment
+    dateFormat  YYYY-MM-DD HH:mm
+    axisFormat  %H:%M
+    section Data
+    Real USGS + Sentinel + OSM grid      :done, n1, 2026-10-17 13:40, 12m
+    Approximate community raster         :done, n2, after n1, 4m
+    section Replay
+    Reports + HRRR + VIIRS + orders      :done, n3, 2026-10-17 13:20, 15m
+    Norte backend and browser defaults   :done, n4, after n3, 5m
+    section Wind
+    Wind protocol/order correction       :done, n5, 2026-10-17 13:10, 8m
+    48-case WindNinja library            :done, n6, 2026-10-17 13:49, 4m
 ```
 
 ## 4. README and team-plan compliance audit
@@ -130,7 +134,8 @@ Status meanings:
 | Wind polling | **Compliant** | `server/app/providers/weather.py`; 5×5 grid test | Open-Meteo is implemented; NWS is an optional alternate source, not required for the MVP. |
 | Hotspot dedupe and event clustering | **Compliant** | `store.py`, `clustering.py`, `service.py`; clustering/store tests | Current in-process algorithm is suitable for the MVP; production scale needs PostGIS or a spatial index. |
 | Live WebSocket delivery | **Compliant** | `contracts.py`, `/ws?mode=live`, contract and API tests | Frozen top-level fields are emitted, with additive `sequence` and `emittedAt` metadata for reconnect safety. |
-| Eaton replay using the same frontend contract | **Partial** | `replay.py`, bundled seed, `wildfire-eaton-replay` | Streaming and authoritative final-perimeter generation work. A historical hotspot/perimeter time series is still needed for IoU validation. |
+| Norte replay using the same frontend contract | **Compliant except final perimeter** | `norte.py`, archived WFIGS/HRRR/FIRMS inputs, bundled replay | Two reports, four VIIRS passes, hourly wind and five official orders are included. WFIGS has not published a perimeter, so final IoU is correctly left pending. |
+| WindNinja terrain library | **Compliant** | `wind_library.py`, `web/public/data/wind/`, component/order tests | 16 directions × 3 speeds × 128² east/north vectors; north-wind direction and exact byte size validated. |
 | Alert evaluation from deterministic arrival results | **Compliant at the service boundary** | single and batch risk endpoints; alert tests | Module C can POST deterministic scenario outputs in one batch. Direct in-process TypeScript invocation is intentionally avoided. |
 | Retell calls for opted-in residents and result writeback | **Partial** | `retell.py`, `service.py`, signed webhook route | Code path is complete and idempotent, but live calls were not executed because no credentials/test numbers were provided. |
 | Model output clearly marked non-official | **Compliant** | Alert WS payload and Retell variables include `non_official` | Keep this label visible in every frontend alert and spoken call script. |
@@ -140,7 +145,7 @@ Status meanings:
 
 ### Other README features outside Module B
 
-The following root README features are owned by A or C and were not evaluated as backend defects: Three.js terrain and fire rendering, GPU cellular automata, 64-member ensemble forecasting, treatment drawing, Dijkstra/min-cut planning, and Eaton IoU calibration.
+The following root README features are owned by A or C and were not evaluated as backend defects: Three.js terrain and fire rendering, GPU cellular automata, 64-member ensemble forecasting, treatment drawing, Dijkstra/min-cut planning, and Norte IoU calibration.
 
 ## 5. Interface differences that should be fixed first
 
@@ -165,8 +170,10 @@ This now matches the frozen team fields. `cell` uses the same EPSG:32611 bounds 
 
 | Package | Verification | Result |
 |---|---|---|
-| Realtime server | Ruff plus unit/integration tests | 22 tests passed |
-| Offline GIS pipeline | Five installed CLI entry points, Ruff, unit/end-to-end tests | 6 tests passed |
+| Realtime server | Ruff plus unit/integration tests | 26 tests passed |
+| Offline GIS pipeline | Seven CLI entry points, Ruff, unit/end-to-end tests | 9 tests passed |
+| Frontend | TypeScript check plus Vite production build against real assets | Passed |
+| Wind library | 48 WindNinja runs; exact-size/finite/vector-direction checks | Passed, 6,291,456 bytes |
 | Direct GOES | Public NOAA GOES-18 object discovery and NetCDF decode | Passed; latest object decoded successfully |
 | Secrets | Pattern scan and `.env.example` review | No committed credentials found |
 | Git state | Local/remote revision comparison | Branch and remote matched at `2794ba1` before this report |
@@ -176,7 +183,7 @@ The automated suite uses mocked provider responses and synthetic rasters. It doe
 ## 7. Acceptance checklist for full Module B completion
 
 - [x] Python contract tests cover the frozen WebSocket field shape; add the same fixture to the TypeScript client when it lands.
-- [x] Eaton replay emits deterministic events through the same schema as live mode.
+- [x] Norte replay emits deterministic events through the same schema as live mode.
 - [x] A generated `communities.json` maps community IDs to grid cells.
 - [x] The batch arrival-risk boundary is covered by an API integration test.
 - [ ] Official orders are stored and always take precedence over modeled alerts.

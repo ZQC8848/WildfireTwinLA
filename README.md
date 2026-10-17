@@ -9,6 +9,11 @@
 - 离线网格工具：[data-pipeline/README.md](data-pipeline/README.md)
 - 实时后端运行说明：[server/README.md](server/README.md)
 - 团队分工与接口约定：[docs/team-plan.md](docs/team-plan.md)
+- 当前演示事件与数据边界：[docs/norte-fire.md](docs/norte-fire.md)
+- 地形风场格式与生成方法：[docs/wind-field.md](docs/wind-field.md)
+
+当前 `main` / `b/backend` 数据域是 **2026 Norte Fire（San Juan Capistrano / San
+Clemente）**。Respond 默认播放 Norte 公共数据回放；Eaton 仅作为兼容的旧回放保留。
 
 ## 核心功能
 
@@ -30,7 +35,7 @@
 | 实时火点 | NASA FIRMS（VIIRS/MODIS）、GOES-18 ABI FDC | FIRMS 约 3 小时内、375 m；GOES 每 5 分钟、2 km |
 | 风况 | Open-Meteo、NWS api.weather.gov | 免费，无需 key |
 | 建筑 | Microsoft US Building Footprints、OpenStreetMap | — |
-| 验证 | NIFC WFIGS 历史火界（2025 年 1 月 Eaton 火灾） | 回放与 IoU 验证 |
+| 验证 | NIFC WFIGS Norte 火界（发布前使用明确标注的临时烧迹地） | 当前 WFIGS 尚无 Norte 周界，不能把热点外包络冒充官方火界 |
 
 ## 对现实的几点认识
 

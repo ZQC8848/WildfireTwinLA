@@ -58,6 +58,7 @@ def test_build_grid_writes_the_browser_contract(tmp_path) -> None:
             crs="EPSG:32611",
             width=8,
             height=6,
+            cell_size=25,
             output=str(output),
         )
     )
