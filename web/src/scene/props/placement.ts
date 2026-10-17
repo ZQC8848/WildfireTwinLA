@@ -186,11 +186,13 @@ export function layoutProps(grid: Grid, buildings: Building[], communities: Comm
     });
   }
   buildings.forEach((b, i) => {
-    // 轮廓 → 连续格子坐标
-    const pts = b.polygonLonLat.map(([lon, lat]) => {
-      const [e, n] = lonLatToUTM(lon, lat);
-      return new THREE.Vector2((e - oE) / S - 0.5, (oN - n) / S - 0.5);
-    });
+    // 轮廓 → 连续格子坐标。轮廓是可选字段：缺失时以所在格子为中心，按典型独栋住宅尺寸（14 × 10 m）、随机 90° 朝向放置
+    const pts = b.polygonLonLat?.length
+      ? b.polygonLonLat.map(([lon, lat]) => {
+          const [e, n] = lonLatToUTM(lon, lat);
+          return new THREE.Vector2((e - oE) / S - 0.5, (oN - n) / S - 0.5);
+        })
+      : defaultFootprint(b.cell % W, Math.floor(b.cell / W), S, hash(b.cell, 11));
     const center = pts.reduce((a, p) => a.add(p), new THREE.Vector2()).divideScalar(pts.length);
     let longest = 0;
     let theta = 0;
@@ -268,6 +270,19 @@ export function layoutProps(grid: Grid, buildings: Building[], communities: Comm
   }
 
   return { items, spans };
+}
+
+/** 没有建筑轮廓时的替代：以格子 (x, y) 为中心的 14 × 10 m 矩形（格子坐标），朝向取 0° 或 90° */
+function defaultFootprint(x: number, y: number, cellSize: number, r: number): THREE.Vector2[] {
+  const hl = 7 / cellSize;
+  const hw = 5 / cellSize;
+  const corners = [
+    [-hl, -hw],
+    [hl, -hw],
+    [hl, hw],
+    [-hl, hw],
+  ];
+  return corners.map(([dx, dy]) => (r < 0.5 ? new THREE.Vector2(x + dx, y + dy) : new THREE.Vector2(x + dy, y + dx)));
 }
 
 function attach(p: Placement, lib: AssetLibrary): THREE.Vector3[] {
