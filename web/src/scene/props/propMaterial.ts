@@ -18,6 +18,8 @@ uniform float uTime;
 uniform float uSway;
 uniform sampler2D uState;
 uniform bool uUseState;
+uniform sampler2D uTreat; // 处理掩膜（同地形）
+uniform bool uHasTreat;
 uniform vec2 uGridSize;
 uniform bool uBurnOn;
 uniform vec4 uBurn; // 圆心 x, 圆心 z, 火线半径, 火线宽度
@@ -50,6 +52,15 @@ void main() {
   float c = cos(aOffset.w);
   float sn = sin(aOffset.w);
   float st = stateAt(aParams.y, aOffset.xz);
+  // 处理区里的植被：防火带全部清除；计划烧除去掉约 60%；疏伐去掉约 40% 并压低树冠
+  if (uHasTreat) {
+    int cc = int(aParams.y + 0.5);
+    int gw = int(uGridSize.x);
+    int t = int(texelFetch(uTreat, ivec2(cc % gw, cc / gw), 0).r * 255.0 + 0.5);
+    float r = fract(sin(dot(aOffset.xz, vec2(12.9898, 78.233))) * 43758.5453);
+    if (t == 1 || (t == 2 && r < 0.6) || (t == 3 && r < 0.4)) s = 0.0;
+    if (t == 3) s *= 0.8;
+  }
   vec3 p = position * s;
   if (aPart < 0.5) {
     if (st > 1.5) p *= 0.0; // 燃尽：树冠、屋顶塌缩消失
@@ -139,6 +150,8 @@ export function createPropMaterial(gridSize: THREE.Vector2, minElev: number, vSc
         uSway: { value: 1 },
         uState: { value: null },
         uUseState: { value: false },
+        uTreat: { value: null },
+        uHasTreat: { value: false },
         uGridSize: { value: gridSize },
         uBurnOn: { value: false },
         uBurn: { value: new THREE.Vector4(0, 0, 0, 150) },
