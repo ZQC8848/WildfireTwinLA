@@ -20,14 +20,14 @@ export async function loadGrid(): Promise<GridBundle> {
       if (!res.ok) throw new Error(`grid.bin: HTTP ${res.status}`);
       const data = new Float32Array(await res.arrayBuffer());
       const expected = meta.width * meta.height * GRID_CHANNELS;
-      if (data.length !== expected) throw new Error(`grid.bin: 长度 ${data.length}，应为 ${expected}`);
+      if (data.length !== expected) throw new Error(`grid.bin: length ${data.length}, expected ${expected}`);
       const [buildings, communities] = await Promise.all([
         fetchJSON<Building[]>("buildings.json").catch(() => []),
         fetchJSON<Community[]>("communities.json").catch(() => []),
       ]);
       return { grid: { meta, data }, buildings, communities, source: "real" };
     } catch (err) {
-      console.info("[loadGrid] 使用合成网格：", (err as Error).message);
+      console.info("[loadGrid] Falling back to synthetic grid:", (err as Error).message);
     }
   }
   return createMockGrid();

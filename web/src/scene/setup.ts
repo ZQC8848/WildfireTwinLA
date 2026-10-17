@@ -20,7 +20,7 @@ export function createScene(container: HTMLElement): SceneContext {
 
   const gl = renderer.getContext() as WebGL2RenderingContext;
   if (!gl.getExtension("EXT_color_buffer_float")) {
-    console.warn("[scene] 不支持 EXT_color_buffer_float，GPU 模拟将无法运行");
+    console.warn("[scene] EXT_color_buffer_float is not supported; GPU simulation will not run");
   }
 
   const scene = new THREE.Scene();

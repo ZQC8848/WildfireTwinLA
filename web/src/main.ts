@@ -18,13 +18,13 @@ for (let c = 0; c < grid.meta.width * grid.meta.height; c++) {
 }
 const [lon, lat] = cellToLonLat(grid.meta, (grid.meta.height / 2) * grid.meta.width + grid.meta.width / 2);
 document.getElementById("hud")!.textContent = [
-  `数据：${bundle.source === "mock" ? "合成网格" : "真实网格"}  ${grid.meta.width}×${grid.meta.height} @ ${grid.meta.cellSize} m`,
-  `中心：${lat.toFixed(4)}, ${lon.toFixed(4)}`,
-  `建筑格：${buildingCells}  建筑：${bundle.buildings.length}  社区：${bundle.communities.length}`,
+  `Data: ${bundle.source === "mock" ? "synthetic grid" : "real grid"}  ${grid.meta.width}×${grid.meta.height} @ ${grid.meta.cellSize} m`,
+  `Center: ${lat.toFixed(4)}, ${lon.toFixed(4)}`,
+  `Building cells: ${buildingCells}  Buildings: ${bundle.buildings.length}  Communities: ${bundle.communities.length}`,
 ].join("\n");
 
 const gui = new GUI({ title: "WildfireTwinLA" });
-gui.add(terrain.material, "wireframe").name("线框");
+gui.add(terrain.material, "wireframe").name("Wireframe");
 
 // 调试用
 Object.assign(window, { bundle, ctx });
