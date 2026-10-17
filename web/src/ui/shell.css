@@ -168,6 +168,11 @@ body[data-mode="respond"] .rail [data-mode-only="respond"] {
   display: block;
 }
 
+/* hidden 属性优先于按模式显示的规则 */
+.rail [hidden] {
+  display: none !important;
+}
+
 /* 指标：左标签、右数字 */
 .metrics {
   display: grid;
@@ -719,4 +724,21 @@ body.painting #app canvas {
 .compare td strong {
   font-weight: 700;
   color: var(--retardant);
+}
+
+/* ---- 数据源 ---- */
+.feed-modes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  width: 100%;
+}
+
+.feed-modes button {
+  padding: 0 6px;
+  font-size: var(--t-13);
+  white-space: nowrap;
+}
+
+.metrics dd.ember {
+  color: var(--ember);
 }

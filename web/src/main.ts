@@ -22,6 +22,8 @@ import { TerrainWindModel, WindLibrary, buildWindField, type WindMode } from "./
 import { CpuFireSim } from "./sim/cpuReference";
 import { Shell, compassName, type Mode } from "./ui/shell";
 import { PlannerController } from "./planner/controller";
+import { HotspotMarkers } from "./scene/hotspots";
+import { RealtimeController } from "./realtime/controller";
 
 const q = new URLSearchParams(location.search);
 const debug = q.has("debug");
@@ -87,8 +89,10 @@ const windLayer = new WindLayer(grid, terrain.minElev, terrain.verticalScale);
 ctx.scene.add(windLayer.object);
 const monitor = new FireMonitor(grid, bundle.communities, bundle.buildings);
 
+// 实时数据推送的 5×5 风场：均匀风模式下直接使用；地形风模式下取其平均作为来流
+let feedField: WindField | null = null;
 const applyWind = () => {
-  currentWind = buildWindField(simParams.windMode, inflow(), windModel, windLibrary);
+  currentWind = simParams.windMode === "uniform" && feedField ? feedField : buildWindField(simParams.windMode, inflow(), windModel, windLibrary);
   sim.setWind(currentWind);
   smoke.setWind(windGrid(currentWind, meta.width, meta.height));
   windLayer.update(currentWind, simParams.windSpeed);
@@ -122,6 +126,7 @@ const shell = new Shell(
     onReset: () => resetSim(),
     onSpeed: (sps) => (simParams.stepsPerSecond = sps),
     onWind: (dir, speed) => {
+      feedField = null; // 手动改风后不再使用推送的风场
       simParams.windFrom = dir;
       simParams.windSpeed = speed;
       shell.setWind(dir, speed);
@@ -138,6 +143,7 @@ const shell = new Shell(
     onBudget: (v) => planner.setBudget(v),
     onSuggest: () => planner.suggest(),
     onShowPlan: (key) => planner.show(key),
+    onFeed: (mode) => realtime.start(mode),
     onShowSmoke: (show) => {
       smoke.object.visible = show;
     },
@@ -239,6 +245,33 @@ const planner: PlannerController = new PlannerController({
   inflow,
   windField: () => currentWind,
   ignitions: () => testIgnitions,
+});
+
+// ---- 实时数据与回放（P5） ----
+const markers = new HotspotMarkers(grid, terrain.minElev, terrain.verticalScale);
+ctx.scene.add(markers.object);
+const realtime: RealtimeController = new RealtimeController({
+  grid,
+  communities: bundle.communities,
+  sim,
+  monitor,
+  markers,
+  setPerimeter: (cells) => terrain.setPerimeter(cells),
+  activateSim: () => activateSim(),
+  resetSim: () => resetSim(),
+  setRunning: (running) => {
+    simParams.running = running;
+    shell.setRunning(running);
+  },
+  setFeedWind: (mean, field) => {
+    feedField = field;
+    simParams.windSpeed = Math.round(mean.speedMs);
+    simParams.windFrom = Math.round(mean.dirFromDeg);
+    shell.setWind(simParams.windFrom, simParams.windSpeed);
+    applyWind();
+  },
+  addIgnitions: (cells) => testIgnitions.push(...cells),
+  onChange: () => refreshPanels(),
 });
 let pending: PointerEvent | null = null;
 ctx.renderer.domElement.addEventListener("pointermove", (e) => (pending = e));
@@ -385,6 +418,17 @@ function refreshPanels() {
         ]
       : null,
   );
+  const feedRows: [string, string][] = [];
+  if (realtime.mode !== "off") {
+    feedRows.push(["Satellite hotspots", realtime.hotspotsReceived.toLocaleString("en-US")]);
+    if (realtime.perimeter) {
+      feedRows.push(["Official perimeter", `${Math.round(realtime.perimeterHa).toLocaleString("en-US")} ha`]);
+      const iou = realtime.perimeterMatch(sim.lastState);
+      if (iou !== null) feedRows.push(["Overlap with simulation", `${Math.round(iou * 100)}%`]);
+    }
+  }
+  shell.setFeed(realtime.mode, realtime.status, feedRows);
+  shell.setCalls(realtime.callTally());
   shell.setRespond(simActive ? monitor.closest() : null, monitor.communities, { affected: monitor.homesAffected, total: monitor.totalHomes }, monitor.events);
   if (debug) {
     const st = props.stats();
@@ -542,6 +586,8 @@ if (paintQ && paintQ.length >= 5) {
 }
 if (q.has("suggest")) planner.suggest();
 if (q.has("cpucheck")) runCpuCheck(Number(q.get("cpucheck")) || 80);
+const feedQ = q.get("feed");
+if (feedQ === "live" || feedQ === "replay") realtime.start(feedQ);
 const modeParam = q.get("mode");
 if (modeParam === "respond" || modeParam === "plan") {
   setMode(modeParam);
@@ -550,4 +596,4 @@ if (modeParam === "respond" || modeParam === "plan") {
 }
 
 // 调试用
-Object.assign(window, { bundle, ctx, terrain, props, layout, sim, smoke, monitor, shell, runCpuCheck });
+Object.assign(window, { bundle, ctx, terrain, props, layout, sim, smoke, monitor, shell, runCpuCheck, realtime, planner });

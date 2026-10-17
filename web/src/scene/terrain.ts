@@ -71,6 +71,8 @@ uniform float uSimMinutes; // 当前模拟时间（分钟）
 uniform sampler2D uTreat; // 处理掩膜：R × 255 = 0 无，1 防火带，2 计划烧除，3 疏伐，4 Zone 0
 uniform bool uHasTreat;
 uniform vec3 uRetardant;
+uniform sampler2D uPerimeter; // 官方火界（R > 0 为火界内），只画轮廓作为对照
+uniform bool uHasPerimeter;
 uniform float uStepMinutes; // 每步分钟数
 uniform sampler2D uState; // 火势模拟状态：R = 0 未燃 / 1 燃烧中 / 2 已燃尽
 uniform bool uUseState;
@@ -332,6 +334,26 @@ void main() {
     }
   }
 
+  // 官方火界轮廓：取覆盖度 0.5 等值线，画成带深色描边的浅色线，白天夜间都清楚
+  if (uHasPerimeter) {
+    vec2 f = fract(vCell);
+    ivec2 c0 = ivec2(floor(vCell));
+    ivec2 hi = ivec2(uGridSize) - 1;
+    float cov = 0.0;
+    for (int j = 0; j < 2; j++) {
+      for (int i = 0; i < 2; i++) {
+        float v = texelFetch(uPerimeter, clamp(c0 + ivec2(i, j), ivec2(0), hi), 0).r;
+        cov += (i == 1 ? f.x : 1.0 - f.x) * (j == 1 ? f.y : 1.0 - f.y) * step(0.5 / 255.0, v);
+      }
+    }
+    float d = abs(cov - 0.5);
+    float fw = max(fwidth(cov), 1e-4);
+    float line = 1.0 - smoothstep(fw * 1.2, fw * 2.2, d);
+    float halo = 1.0 - smoothstep(fw * 2.2, fw * 4.0, d);
+    col = mix(col, vec3(0.05), halo * 0.6);
+    col = mix(col, vec3(0.93, 0.95, 0.92), line);
+  }
+
   // 悬停格子描边
   vec2 d = abs(vCell - uHover);
   float m = max(d.x, d.y);
@@ -411,6 +433,8 @@ export class Terrain {
           uTreat: { value: null },
           uHasTreat: { value: false },
           uRetardant: { value: new THREE.Color("#D63A73") },
+          uPerimeter: { value: null },
+          uHasPerimeter: { value: false },
           uStepMinutes: { value: 5 },
           uState: { value: null },
           uUseState: { value: false },
@@ -465,6 +489,25 @@ export class Terrain {
 
   clearHover() {
     this.uniforms.uHover.value.set(-10, -10);
+  }
+
+  /** 设置官方火界（格子索引列表）；传 null 清除 */
+  setPerimeter(cells: number[] | null) {
+    const { width, height } = this.grid.meta;
+    if (!cells) {
+      this.uniforms.uHasPerimeter.value = false;
+      return;
+    }
+    const mask = new Uint8Array(width * height);
+    for (const c of cells) if (c >= 0 && c < mask.length) mask[c] = 255;
+    const old = this.uniforms.uPerimeter.value as THREE.DataTexture | null;
+    old?.dispose();
+    const tex = new THREE.DataTexture(mask, width, height, THREE.RedFormat, THREE.UnsignedByteType);
+    tex.minFilter = THREE.NearestFilter;
+    tex.magFilter = THREE.NearestFilter;
+    tex.needsUpdate = true;
+    this.uniforms.uPerimeter.value = tex;
+    this.uniforms.uHasPerimeter.value = true;
   }
 
   setSatellite(tex: THREE.Texture) {
