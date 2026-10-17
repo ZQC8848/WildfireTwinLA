@@ -538,3 +538,19 @@ body:not(.debug) #hud,
 body:not(.debug) .stats {
   display: none !important;
 }
+
+/* 速度滑块：10 档 */
+.speed-range {
+  width: 110px;
+  accent-color: var(--retardant);
+}
+
+.speed-label {
+  min-width: 88px;
+  white-space: nowrap;
+}
+
+.wind-rose .map-card-row {
+  justify-content: flex-start;
+  gap: 6px;
+}

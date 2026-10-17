@@ -131,6 +131,9 @@ const shell = new Shell(
       applyWind();
     },
     onLayer: (layer) => (terrain.layer = layer),
+    onShowSmoke: (show) => {
+      smoke.object.visible = show;
+    },
     onShowWind: (show) => {
       simParams.showWind = show;
       windLayer.object.visible = show;
@@ -447,9 +450,8 @@ if (debug) {
   fSim.add(simParams, "spotting").name("Spotting (embers)").onChange((v: boolean) => (sim.spotting = v));
   fSim.add(simParams, "seed", 1, 999, 1).name("Random seed").onChange((v: number) => (sim.seed = v));
   fSim.add({ check: () => runCpuCheck() }, "check").name("Check against CPU");
-  const smokeParams = { visible: true, rate: smoke.rate, opacity: 0.32 };
+  const smokeParams = { rate: smoke.rate, opacity: smoke.material.uniforms.uOpacity.value as number };
   const fSmoke = gui.addFolder("Smoke");
-  fSmoke.add(smokeParams, "visible").name("Show smoke").onChange((v: boolean) => (smoke.object.visible = v));
   fSmoke.add(smokeParams, "rate", 20, 600, 10).name("Particles per second").onChange((v: number) => (smoke.rate = v));
   fSmoke.add(smokeParams, "opacity", 0.05, 0.8, 0.01).name("Opacity").onChange((v: number) => (smoke.material.uniforms.uOpacity.value = v));
 }

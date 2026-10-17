@@ -10,13 +10,12 @@ import { GRID_CHANNELS, type Grid } from "@core";
 const vertexShader = /* glsl */ `
 in vec4 aSpawn; // x, 地面高程（米）, z, 出生时间（秒）
 in vec4 aWind;  // 风速 向东, 向南（m/s）, 随机种子, 大小系数
+in vec2 aPace;  // 出生时的漂移系数与寿命（秒）。每个粒子固定，全局节奏变化不会拖动空中已有的烟
 
 uniform float uTime;
-uniform float uLife;
 uniform float uVScale;
 uniform float uMinElev;
 uniform float uRise;
-uniform float uDrift;
 
 out vec2 vUv;
 out float vAge;
@@ -27,21 +26,23 @@ out float vAlpha;
 
 void main() {
   float age = uTime - aSpawn.w;
-  if (age < 0.0 || age > uLife) {
+  float life = aPace.y;
+  if (age < 0.0 || age > life) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0); // 不在生命期内：放到裁剪空间之外
     return;
   }
-  float k = age / uLife;
+  float k = age / life;
   float seed = aWind.z;
   // 上升：开始快、逐渐趋缓（热烟羽浮力减弱）
   float h = uRise * (1.0 - pow(1.0 - k, 2.2));
   // 漂移：越高越受风影响，烟柱向下风方向弯
-  vec2 drift = aWind.xy * uDrift * age * (0.25 + 0.75 * k);
-  // 湍流
-  vec2 turb = vec2(sin(age * 0.6 + seed * 17.0), cos(age * 0.5 + seed * 11.0)) * 40.0 * k;
+  vec2 drift = aWind.xy * aPace.x * age * (0.25 + 0.75 * k);
+  // 横向扩散：每个粒子沿一个随机方向单调向外散开，烟羽随高度变宽；不用周期函数，避免来回摆动
+  float ang = seed * 19.47;
+  vec2 turb = vec2(cos(ang), sin(ang)) * (60.0 + 90.0 * fract(seed * 7.31)) * k;
   vec3 center = vec3(aSpawn.x + drift.x + turb.x, (aSpawn.y - uMinElev) * uVScale + 20.0 + h, aSpawn.z + drift.y + turb.y);
 
-  float size = mix(50.0, 420.0, sqrt(k)) * aWind.w;
+  float size = mix(60.0, 480.0, sqrt(k)) * aWind.w;
   vec4 mvPosition = viewMatrix * vec4(center, 1.0);
   // 绕视线方向随机旋转，避免所有粒子同一朝向
   float r = seed * 6.2831853 + age * 0.05;
@@ -121,9 +122,10 @@ export class Smoke {
   readonly object: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial>;
   readonly material: THREE.ShaderMaterial;
   /** 每秒最多生成的粒子数 */
-  rate = 220;
+  rate = 380;
   private spawn: THREE.InstancedBufferAttribute;
   private wind: THREE.InstancedBufferAttribute;
+  private pace: THREE.InstancedBufferAttribute;
   private next = 0;
   private acc = 0;
   private sources: number[] = [];
@@ -137,7 +139,7 @@ export class Smoke {
     cellWind: Float32Array,
     minElev: number,
     vScale: number,
-    readonly capacity = 3000,
+    readonly capacity = 5000,
   ) {
     this.cellWind = cellWind;
     const quad = new THREE.PlaneGeometry(1, 1);
@@ -151,6 +153,8 @@ export class Smoke {
     this.wind = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4).setUsage(THREE.DynamicDrawUsage);
     geo.setAttribute("aSpawn", this.spawn);
     geo.setAttribute("aWind", this.wind);
+    this.pace = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 2), 2).setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute("aPace", this.pace);
     geo.instanceCount = capacity;
 
     this.material = new THREE.ShaderMaterial({
@@ -164,12 +168,13 @@ export class Smoke {
         THREE.UniformsLib.fog,
         {
           uTime: { value: 0 },
+          // uLife / uDrift 只是新生粒子写入 aPace 的当前节奏，shader 不直接读取
           uLife: { value: BASE_LIFE },
           uVScale: { value: vScale },
           uMinElev: { value: minElev },
           uRise: { value: 1100 },
           uDrift: { value: BASE_DRIFT },
-          uOpacity: { value: 0.32 },
+          uOpacity: { value: 0.5 },
           uNight: { value: 0 },
         },
       ]),
@@ -267,6 +272,7 @@ export class Smoke {
     const { width: W, height: H, cellSize: S } = this.grid.meta;
     const spawn = this.spawn.array as Float32Array;
     const wind = this.wind.array as Float32Array;
+    const pace = this.pace.array as Float32Array;
     const first = this.next;
     for (let i = 0; i < n; i++) {
       const c = this.pickSource();
@@ -281,15 +287,18 @@ export class Smoke {
       wind[j * 4 + 1] = this.cellWind[c * 2 + 1];
       wind[j * 4 + 2] = this.random();
       wind[j * 4 + 3] = 0.7 + 0.6 * this.random();
+      pace[j * 2] = this.material.uniforms.uDrift.value;
+      pace[j * 2 + 1] = this.material.uniforms.uLife.value;
       this.next = (this.next + 1) % this.capacity;
     }
     // 只上传改动过的区段（环形缓冲可能绕回开头）
-    for (const attr of [this.spawn, this.wind]) {
+    for (const attr of [this.spawn, this.wind, this.pace]) {
+      const s = attr.itemSize;
       attr.clearUpdateRanges();
-      if (first + n <= this.capacity) attr.addUpdateRange(first * 4, n * 4);
+      if (first + n <= this.capacity) attr.addUpdateRange(first * s, n * s);
       else {
-        attr.addUpdateRange(first * 4, (this.capacity - first) * 4);
-        attr.addUpdateRange(0, (first + n - this.capacity) * 4);
+        attr.addUpdateRange(first * s, (this.capacity - first) * s);
+        attr.addUpdateRange(0, (first + n - this.capacity) * s);
       }
       attr.needsUpdate = true;
     }

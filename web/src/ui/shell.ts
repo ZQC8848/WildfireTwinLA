@@ -18,6 +18,7 @@ export interface ShellHandlers {
   onWindModel(model: "terrain" | "uniform"): void;
   onLayer(layer: LayerId): void;
   onShowWind(show: boolean): void;
+  onShowSmoke(show: boolean): void;
 }
 
 const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
@@ -32,8 +33,13 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string,
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
+/** 10 档速度对应的每秒步数 */
+export const SPEED_LEVELS = [1, 2, 3, 5, 8, 12, 16, 20, 30, 40];
+
 export class Shell {
   mode: Mode = "plan";
+  /** 每步对应的模拟分钟数，用于速度标签 */
+  stepMinutes = 5;
   private q = <T extends Element>(sel: string) => document.querySelector<T>(sel)!;
   private elevRange: [number, number] = [0, 1];
 
@@ -101,10 +107,9 @@ export class Shell {
         <button class="btn" id="reset">Reset</button>
       </div>
       <div class="bar-group">
-        <span class="bar-label">Speed</span>
-        <div class="segmented" id="speed">
-          <button data-sps="8">Slow</button><button data-sps="20">Normal</button><button data-sps="40">Fast</button>
-        </div>
+        <label class="bar-label" for="speed">Speed</label>
+        <input class="range speed-range" id="speed" type="range" min="1" max="10" step="1" aria-describedby="speed-label" />
+        <span class="figure speed-label" id="speed-label"></span>
       </div>
       <div class="bar-group"><span class="figure elapsed" id="elapsed">0 min</span></div>
       <div class="bar-spacer"></div>
@@ -138,6 +143,7 @@ export class Shell {
         <div>
           <div id="rose-label" class="figure"></div>
           <label class="map-card-row"><input type="checkbox" id="show-wind" /> Show wind arrows</label>
+          <label class="map-card-row"><input type="checkbox" id="show-smoke" checked /> Show smoke</label>
         </div>
       </div>`;
 
@@ -147,11 +153,10 @@ export class Shell {
     this.q<HTMLButtonElement>("#run").addEventListener("click", () => this.handlers.onRunToggle());
     this.q<HTMLButtonElement>("#step").addEventListener("click", () => this.handlers.onStep());
     this.q<HTMLButtonElement>("#reset").addEventListener("click", () => this.handlers.onReset());
-    this.q<HTMLDivElement>("#speed").addEventListener("click", (e) => {
-      const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-sps]");
-      if (!b) return;
-      this.setSpeed(Number(b.dataset.sps));
-      this.handlers.onSpeed(Number(b.dataset.sps));
+    this.q<HTMLInputElement>("#speed").addEventListener("input", (e) => {
+      const sps = SPEED_LEVELS[Number((e.target as HTMLInputElement).value) - 1];
+      this.setSpeed(sps);
+      this.handlers.onSpeed(sps);
     });
     const dir = this.q<HTMLSelectElement>("#wind-dir");
     const speed = this.q<HTMLInputElement>("#wind-speed");
@@ -170,6 +175,7 @@ export class Shell {
       this.handlers.onLayer(layer.value as LayerId);
     });
     this.q<HTMLInputElement>("#show-wind").addEventListener("change", (e) => this.handlers.onShowWind((e.target as HTMLInputElement).checked));
+    this.q<HTMLInputElement>("#show-smoke").addEventListener("change", (e) => this.handlers.onShowSmoke((e.target as HTMLInputElement).checked));
 
     this.setSpeed(opts.stepsPerSecond);
     this.setWind(opts.windDir, opts.windSpeed);
@@ -194,9 +200,16 @@ export class Shell {
   }
 
   setSpeed(sps: number) {
-    this.q<HTMLDivElement>("#speed")
-      .querySelectorAll<HTMLButtonElement>("button")
-      .forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.sps) === sps)));
+    // 取最接近的档位
+    let level = 0;
+    SPEED_LEVELS.forEach((v, i) => {
+      if (Math.abs(v - sps) < Math.abs(SPEED_LEVELS[level] - sps)) level = i;
+    });
+    this.q<HTMLInputElement>("#speed").value = String(level + 1);
+    // 每秒真实时间相当于多少模拟时间
+    const simMinPerSec = SPEED_LEVELS[level] * this.stepMinutes;
+    const rate = simMinPerSec >= 60 ? `${(simMinPerSec / 60).toFixed(simMinPerSec % 60 ? 1 : 0)} h/s` : `${simMinPerSec} min/s`;
+    this.q<HTMLSpanElement>("#speed-label").textContent = `${level + 1} (${rate})`;
   }
 
   setWind(dirFromDeg: number, speedMs: number) {
