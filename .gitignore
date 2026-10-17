@@ -3,6 +3,8 @@ node_modules/
 dist/
 .venv/
 __pycache__/
+.pytest_cache/
+.ruff_cache/
 
 # 大体积地理数据（原始下载与中间产物）
 data/raw/
@@ -10,8 +12,12 @@ data/cache/
 *.tif
 *.tiff
 
-# 密钥
+# 密钥与本地数据库
 .env
 .env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
 
 .DS_Store
