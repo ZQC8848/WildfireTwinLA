@@ -39,7 +39,7 @@ const { grid } = bundle;
 const { meta } = grid;
 const ctx = createScene(document.getElementById("app")!);
 
-const terrain = new Terrain(grid);
+const terrain = new Terrain(grid, 1.5, bundle.source === "mock");
 ctx.scene.add(terrain.mesh);
 
 // Tia 导出与网格对齐的真彩色底图后自动启用；合成网格没有对应底图

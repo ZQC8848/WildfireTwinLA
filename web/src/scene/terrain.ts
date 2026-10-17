@@ -200,7 +200,9 @@ void main() {
       col = vb.x * veg + vb.y * uNatural[3];
       // 河岸外 10 m 内略暗：湿润的河岸
       col *= 1.0 - 0.22 * smoothstep(10.0, 0.0, wf.r) * (1.0 - water);
-      col = mix(col, uClassColors[0], road);
+      // 大片铺装（城区的停车场、硬化地面）离路缘较远处过渡到浅色混凝土，窄路仍是深色路面
+      vec3 paved = mix(uClassColors[0], vec3(0.5, 0.5, 0.47), smoothstep(-10.0, -35.0, wf.g));
+      col = mix(col, paved, road);
     }
   } else if (uLayer == 1) {
     col = ramp((vElev - uElevRange.x) / (uElevRange.y - uElevRange.x));
@@ -417,6 +419,8 @@ export class Terrain {
   constructor(
     readonly grid: Grid,
     verticalScale = 1.5,
+    /** 合成网格：把社区外的不可燃区域当作溪流；真实数据只把海平面附近的区域当作水面 */
+    inferStreams = true,
   ) {
     const { width, height, cellSize } = grid.meta;
     this._verticalScale = verticalScale;
@@ -492,7 +496,7 @@ export class Terrain {
     });
     // UniformsUtils.merge 会克隆纹理，所以在合并之后再赋值
     material.uniforms.uGrid.value = this.gridTexture;
-    material.uniforms.uWater.value = buildWaterTexture(grid);
+    material.uniforms.uWater.value = buildWaterTexture(grid, inferStreams);
 
     this.mesh = new THREE.Mesh(geo, material);
     // 几何体是平的，位移在 GPU 上完成，包围体不可信

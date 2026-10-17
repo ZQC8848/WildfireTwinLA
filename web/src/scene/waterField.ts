@@ -1,7 +1,10 @@
 // 河流与道路的有向距离场（SDF），用于在 shader 中画出平滑的岸线与路缘，代替 25 m 格子的方形台阶。
 //
-// 网格只有"不可燃"一个类别，河流与道路混在一起。这里按连通区域区分：
-// 大部分格子位于社区之外的不可燃区域视为河流，其余视为道路。真实数据若提供单独的水体图层，可直接替换 classify。
+// 网格只有"不可燃"一个类别，水体、道路与城区铺装混在一起。这里按连通区域区分：
+// - 高程不超过 SEA_LEVEL_M 的格子逐格判为海（真实数据的西南角是太平洋；海与沿岸城区的不可燃格常连成一片，不能按整片判断）
+// - 合成网格（inferStreams）：大部分格子位于社区之外的区域视为河流（模仿峡谷溪流）
+// - 真实数据：其余都视为道路与铺装。真实城区里大片的不可燃格是道路、停车场和硬化地面，按河流画会满屏水面
+// 真实数据若提供单独的水体图层，可直接替换 classify。
 //
 // 输出 RGBA32F 纹理，每格：
 //   R 到河岸的有向距离（米，水内为负）
@@ -94,7 +97,9 @@ function blur3(src: Float32Array, W: number, H: number, passes: number): Float32
 }
 
 /** 把不可燃格子分成河流与道路 */
-export function classify(grid: Grid): { water: Uint8Array; road: Uint8Array } {
+const SEA_LEVEL_M = 1;
+
+export function classify(grid: Grid, inferStreams = true): { water: Uint8Array; road: Uint8Array } {
   const { width: W, height: H } = grid.meta;
   const cls = (i: number) => grid.data[i * GRID_CHANNELS + 3];
   // 社区范围：建筑格向外扩 3 格
@@ -121,12 +126,14 @@ export function classify(grid: Grid): { water: Uint8Array; road: Uint8Array } {
     // 4 连通的不可燃区域
     const comp: number[] = [];
     let inTown = 0;
+
     stack.push(s);
     seen[s] = 1;
     while (stack.length) {
       const c = stack.pop()!;
       comp.push(c);
       inTown += town[c];
+
       const x = c % W;
       const y = Math.floor(c / W);
       for (const [nx, ny] of [
@@ -143,15 +150,15 @@ export function classify(grid: Grid): { water: Uint8Array; road: Uint8Array } {
         }
       }
     }
-    const isWater = inTown / comp.length < 0.5;
-    for (const c of comp) (isWater ? water : road)[c] = 1;
+    const isStream = inferStreams && inTown / comp.length < 0.5;
+    for (const c of comp) (isStream || grid.data[c * GRID_CHANNELS] <= SEA_LEVEL_M ? water : road)[c] = 1;
   }
   return { water, road };
 }
 
-export function buildWaterTexture(grid: Grid): THREE.DataTexture {
+export function buildWaterTexture(grid: Grid, inferStreams = true): THREE.DataTexture {
   const { width: W, height: H, cellSize: S } = grid.meta;
-  const { water, road } = classify(grid);
+  const { water, road } = classify(grid, inferStreams);
   // 两遍 3×3 平滑：等值线在格子角点处不再有尖角
   const sdfWater = blur3(signedDistance(water, W, H, S), W, H, 2);
   const sdfRoad = blur3(signedDistance(road, W, H, S), W, H, 1);
