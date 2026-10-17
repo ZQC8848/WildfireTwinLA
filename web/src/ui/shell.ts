@@ -35,6 +35,8 @@ export interface ShellHandlers {
   onShowWind(show: boolean): void;
   onForecast(): void;
   onShowAlerts(show: boolean): void;
+  onShowMarkers(show: boolean): void;
+  onCameraMode(mode: "orbit" | "fly"): void;
   onShowForecast(show: boolean): void;
   onShowSmoke(show: boolean): void;
   onTool(tool: Tool | null): void;
@@ -217,6 +219,10 @@ export class Shell {
         <div class="segmented view-presets" id="view-presets" role="group" aria-label="Camera view">
           <button data-view="overview" title="Overview (1)">Overview</button><button data-view="fire" title="Fire front (2)">Fire front</button><button data-view="community" title="Closest community (3)">Community</button>
         </div>
+        <div class="segmented camera-mode" id="camera-mode" role="group" aria-label="Camera controls">
+          <button data-cam="orbit" aria-pressed="true" title="Drag to orbit, scroll to zoom">Orbit</button><button data-cam="fly" aria-pressed="false" title="Unity-style fly camera">Fly (WASD)</button>
+        </div>
+        <p class="tool-note fly-hint" id="fly-hint" hidden>Right-drag to look. W A S D to move, Q / E down and up, Shift for speed. Scroll to move forward; right-drag and scroll to change speed (<span id="fly-speed">×1.0</span>).</p>
       </div>
       <div class="map-card" id="layer-card">
         <div class="map-card-row"><label for="layer">Map layer</label><select class="select" id="layer">${layerOptions}</select></div>
@@ -232,7 +238,8 @@ export class Shell {
           <div id="rose-label" class="figure"></div>
           <label class="map-card-row"><input type="checkbox" id="show-wind" /> Show wind arrows</label>
           <label class="map-card-row"><input type="checkbox" id="show-smoke" checked /> Show smoke</label>
-          <label class="map-card-row" title="Shortcut: H"><input type="checkbox" id="show-alerts" checked /> Show home alerts</label>
+          <label class="map-card-row" title="Shortcut: H"><input type="checkbox" id="show-alerts" checked /> Show home alerts <span class="alerts-count" id="alerts-count" hidden></span></label>
+          <label class="map-card-row"><input type="checkbox" id="show-markers" checked /> Show satellite markers</label>
         </div>
       </div>`;
 
@@ -314,6 +321,14 @@ export class Shell {
     this.setBrush(3);
     this.q<HTMLInputElement>("#show-smoke").addEventListener("change", (e) => this.handlers.onShowSmoke((e.target as HTMLInputElement).checked));
     this.q<HTMLInputElement>("#show-alerts").addEventListener("change", (e) => this.handlers.onShowAlerts((e.target as HTMLInputElement).checked));
+    this.q<HTMLInputElement>("#show-markers").addEventListener("change", (e) => this.handlers.onShowMarkers((e.target as HTMLInputElement).checked));
+    this.q<HTMLDivElement>("#camera-mode").addEventListener("click", (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-cam]");
+      if (!b) return;
+      const mode = b.dataset.cam as "orbit" | "fly";
+      this.setCameraMode(mode);
+      this.handlers.onCameraMode(mode);
+    });
     this.q<HTMLButtonElement>("#forecast-run").addEventListener("click", () => this.handlers.onForecast());
     this.q<HTMLInputElement>("#forecast-show").addEventListener("change", (e) => this.handlers.onShowForecast((e.target as HTMLInputElement).checked));
 
@@ -495,6 +510,24 @@ export class Shell {
       `<tr><th>Cost</th>${keys.map((k) => cell(k, (r) => (r.cost ? fmtMoney(r.cost) + (r.overBudget ? "*" : "") : "–"))).join("")}</tr>`,
       `<tr><th>Homes saved per $100k</th>${keys.map((k) => cell(k, (r) => (r.withinNoise ? "≈ 0" : r.savedPer100k === null ? "–" : r.savedPer100k.toFixed(1)))).join("")}</tr>`,
     ].join("");
+  }
+
+  setCameraMode(mode: "orbit" | "fly") {
+    this.q<HTMLDivElement>("#camera-mode")
+      .querySelectorAll<HTMLButtonElement>("button")
+      .forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.cam === mode)));
+    this.q<HTMLParagraphElement>("#fly-hint").hidden = mode !== "fly";
+  }
+
+  setFlySpeed(scale: number) {
+    this.q<HTMLSpanElement>("#fly-speed").textContent = `×${scale.toFixed(1)}`;
+  }
+
+  /** 冒泡数量达到上限时显示"显示了多少 / 共多少" */
+  setAlertCount(shown: number, total: number) {
+    const el = this.q<HTMLSpanElement>("#alerts-count");
+    el.hidden = total <= shown;
+    el.textContent = `(${shown} of ${total})`;
   }
 
   /** 有报告受损区域数据时在图例里加一项 */

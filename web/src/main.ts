@@ -34,6 +34,8 @@ import { loadRoads, rasterizeRoads } from "./scene/roads";
 import { HomeStatus, type HomeAlert } from "./sim/homeStatus";
 import { HomeAlerts } from "./ui/homeAlerts";
 import { HouseFlames } from "./scene/houseFlames";
+import { FlyControls } from "./scene/flyControls";
+import { sampleElevation, worldToGrid } from "./scene/coords";
 import { ENSEMBLE_FACTOR, ENSEMBLE_MEMBERS, Ensemble, communityOutlook, type CommunityOutlook, type EnsembleResult } from "./sim/ensemble";
 
 const q = new URLSearchParams(location.search);
@@ -114,7 +116,7 @@ ctx.scene.add(wires.object);
 // ---- 风与火 ----
 const simParams = {
   running: false,
-  stepsPerSecond: 20,
+  stepsPerSecond: 2,
   // Plan 默认情景：Norte Fire 当天中午的 HRRR 风
   windSpeed: NORTE_SCENARIO.windSpeed,
   windFrom: NORTE_SCENARIO.windFrom,
@@ -306,6 +308,8 @@ const shell = new Shell(
     },
     onForecast: () => runForecast(),
     onShowAlerts: (show) => homeAlerts.setVisible(show),
+    onShowMarkers: (show) => (markers.object.visible = show),
+    onCameraMode: (mode) => fly.setEnabled(mode === "fly"),
     onShowForecast: (show) => {
       forecastShown = show;
       showForecast();
@@ -473,6 +477,11 @@ bundle.buildings.forEach((b, i) => {
   roofSize[i] = 8;
 });
 const homeStatus = new HomeStatus(grid, bundle.buildings, roofAnchors, bundle.communities);
+/** 世界坐标 (x, z) 处的地面高度（显示坐标，已含竖向夸张） */
+const groundAt = (x: number, z: number) => {
+  const [gx, gy] = worldToGrid(meta, x, z);
+  return (sampleElevation(grid, gx, gy) - terrain.minElev) * terrain.verticalScale;
+};
 const houseFlames = new HouseFlames();
 ctx.scene.add(houseFlames.object);
 const describeHome = (a: HomeAlert): { title: string; rows: [string, string][] } => {
@@ -506,7 +515,26 @@ const homeAlerts = new HomeAlerts(
     },
   },
   describeHome,
+  groundAt,
+  (shown, total) => shell.setAlertCount(shown, total),
 );
+
+// ---- 相机：轨道模式（默认）与飞行模式（WASD，类似 Unity 编辑器） ----
+const fly = new FlyControls(
+  ctx.camera,
+  ctx.controls,
+  ctx.renderer.domElement,
+  groundAt,
+  () => {
+    const r = ctx.renderer.domElement.getBoundingClientRect();
+    return picker.pick(r.left + r.width / 2, r.top + r.height / 2)?.point ?? null;
+  },
+  (scale) => shell.setFlySpeed(scale),
+);
+ctx.onFrame((dt) => {
+  fly.update(dt);
+  if (fly.busy) rig.stop();
+});
 function refreshHomes() {
   if (!simActive || !sim.lastState) {
     homeStatus.reset();
@@ -586,7 +614,7 @@ let downAt: [number, number] | null = null;
 ctx.renderer.domElement.addEventListener("pointerdown", (e) => (downAt = [e.clientX, e.clientY]));
 ctx.renderer.domElement.addEventListener("pointerup", (e) => {
   // 点火只在 Plan 模式下可用；Respond 模式的火只来自实时数据或回放
-  if (!downAt || planner.isPainting || shell.mode === "respond") return;
+  if (!downAt || e.button !== 0 || planner.isPainting || shell.mode === "respond") return;
   const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
   downAt = null;
   if (moved > 4) return;
@@ -853,6 +881,10 @@ if (debug) {
   fSim.add({ check: () => runCpuCheck() }, "check").name("Check against CPU");
   fSim.add({ bench: () => runBench() }, "bench").name("Benchmark forecast (GPU vs CPU)");
   const smokeParams = { rate: smoke.rate, opacity: smoke.material.uniforms.uOpacity.value as number };
+  const fAlerts = gui.addFolder("Home alerts");
+  fAlerts.add(homeAlerts, "maxVisible", 5, 160, 1).name("Max bubbles");
+  fAlerts.add(homeAlerts, "rangeFactor", 1, 10, 0.5).name("Range × camera height");
+  fAlerts.add(homeAlerts, "minRange", 300, 5000, 100).name("Min range (m)");
   const fSmoke = gui.addFolder("Smoke");
   fSmoke.add(smokeParams, "rate", 20, 600, 10).name("Particles per second").onChange((v: number) => (smoke.rate = v));
   fSmoke.add(smokeParams, "opacity", 0.05, 0.8, 0.01).name("Opacity").onChange((v: number) => (smoke.material.uniforms.uOpacity.value = v));
@@ -935,4 +967,4 @@ if (modeParam === "respond" || modeParam === "plan") {
 }
 
 // 调试用
-Object.assign(window, { bundle, ctx, terrain, props, layout, sim, smoke, monitor, shell, runCpuCheck, realtime, planner, ensemble, runForecast, runBench, getForecast: () => ({ forecast, outlook }), homeStatus, homeAlerts, houseFlames });
+Object.assign(window, { bundle, ctx, terrain, props, layout, sim, smoke, monitor, shell, runCpuCheck, realtime, planner, ensemble, runForecast, runBench, getForecast: () => ({ forecast, outlook }), homeStatus, homeAlerts, houseFlames, markers, fly });

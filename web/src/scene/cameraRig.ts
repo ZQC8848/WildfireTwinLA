@@ -16,11 +16,17 @@ export class CameraRig {
     controls.addEventListener("start", () => (this.t = 1));
   }
 
+  /** 中止正在进行的过渡（飞行模式下用户一操作就中止） */
+  stop() {
+    this.t = 1;
+  }
+
   flyTo(pos: THREE.Vector3, target: THREE.Vector3) {
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
       this.camera.position.copy(pos);
       this.controls.target.copy(target);
-      this.controls.update();
+      if (this.controls.enabled) this.controls.update();
+      else this.camera.lookAt(target);
       this.t = 1;
       return;
     }
@@ -37,5 +43,7 @@ export class CameraRig {
     const k = this.t < 0.5 ? 4 * this.t ** 3 : 1 - (-2 * this.t + 2) ** 3 / 2;
     this.camera.position.lerpVectors(this.from.pos, this.to.pos, k);
     this.controls.target.lerpVectors(this.from.target, this.to.target, k);
+    // 飞行模式下轨道控制不更新相机朝向，这里直接看向目标
+    if (!this.controls.enabled) this.camera.lookAt(this.controls.target);
   }
 }

@@ -64,7 +64,8 @@ export function createScene(container: HTMLElement): SceneContext {
     timer.update(time);
     const dt = timer.getDelta();
     for (const fn of callbacks) fn(dt);
-    controls.update();
+    // 飞行模式下关闭轨道控制（见 flyControls.ts），否则 update() 会把相机朝向拉回轨道中心
+    if (controls.enabled) controls.update();
     ctx.render();
     stats.update();
   });

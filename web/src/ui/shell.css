@@ -1042,3 +1042,19 @@ body.painting #app canvas {
     animation: none;
   }
 }
+
+.camera-mode {
+  margin-top: 8px;
+}
+
+/* width 0 + min-width 100%：说明文字随卡片宽度换行，不把卡片撑宽 */
+.fly-hint {
+  width: 0;
+  min-width: 100%;
+  margin: 8px 0 0;
+}
+
+.alerts-count {
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}

@@ -4,6 +4,8 @@
 //   聚合气泡只显示最紧急状态的图标与数量，分项计数在悬停卡片里；拉近后自动拆成单栋
 // - 单栋气泡在状态变化时弹出；着火的气泡持续脉动（系统"减少动态效果"时关闭，见 shell.css）
 // - 悬停显示详情卡片，点击时相机飞过去（聚合气泡拉近到该区域）
+// - 距离上限：只显示离相机 range 以内的房屋，range = max(minRange, rangeFactor × 相机离地高度)，
+//   随镜头远近自动调整；接近上限时淡出。数量上限：最多 maxVisible 个气泡，超出时按紧急程度、再按距离取前面的
 
 import * as THREE from "three";
 import type { HomeAlert, HomeState } from "../sim/homeStatus";
@@ -26,6 +28,8 @@ interface Cluster {
   x: number;
   y: number;
   n: number;
+  /** 成员中离相机最近的距离（米） */
+  dist: number;
   counts: Record<HomeState, number>;
   top: HomeAlert;
   members: HomeAlert[];
@@ -47,12 +51,22 @@ export class HomeAlerts {
   private v = new THREE.Vector3();
   private clusters: Cluster[] = [];
   private reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  /** 同时显示的气泡上限 */
+  maxVisible = 40;
+  /** 距离上限 = max(minRange, rangeFactor × 相机离地高度)，单位米 */
+  rangeFactor = 3;
+  minRange = 1500;
+  private lastCount = "";
 
   constructor(
     private camera: THREE.PerspectiveCamera,
     private canvas: HTMLCanvasElement,
     private handlers: HomeAlertHandlers,
     private describe: (a: HomeAlert) => { title: string; rows: [string, string][] },
+    /** 世界坐标 (x, z) 处的地面高度（显示坐标） */
+    private groundAt: (x: number, z: number) => number,
+    /** 显示数量变化时回调：显示了多少、超出上限前共有多少 */
+    private onCount?: (shown: number, total: number) => void,
   ) {
     this.root = document.createElement("div");
     this.root.className = "home-alerts";
@@ -83,8 +97,12 @@ export class HomeAlerts {
     s.width = `${rect.width}px`;
     s.height = `${rect.height}px`;
 
+    const cam = this.camera.position;
+    const range = Math.max(this.minRange, this.rangeFactor * Math.max(0, cam.y - this.groundAt(cam.x, cam.z)));
     const map = new Map<string, Cluster>();
     for (const a of this.items) {
+      const dist = a.anchor.distanceTo(cam);
+      if (dist > range) continue;
       this.v.copy(a.anchor).project(this.camera);
       if (this.v.z > 1 || this.v.z < -1) continue;
       const x = ((this.v.x + 1) / 2) * rect.width;
@@ -93,12 +111,13 @@ export class HomeAlerts {
       const key = `${Math.floor(x / CELL_PX)},${Math.floor(y / CELL_PX)}`;
       let c = map.get(key);
       if (!c) {
-        c = { key, x: 0, y: 0, n: 0, counts: { burning: 0, burned: 0, threat: 0 }, top: a, members: [], newest: 0 };
+        c = { key, x: 0, y: 0, n: 0, dist, counts: { burning: 0, burned: 0, threat: 0 }, top: a, members: [], newest: 0 };
         map.set(key, c);
       }
       c.x += x;
       c.y += y;
       c.n++;
+      c.dist = Math.min(c.dist, dist);
       c.counts[a.state]++;
       c.members.push(a);
       c.newest = Math.max(c.newest, a.since);
@@ -116,12 +135,20 @@ export class HomeAlerts {
         continue;
       }
       host.n += c.n;
+      host.dist = Math.min(host.dist, c.dist);
       for (const s of ["burning", "burned", "threat"] as HomeState[]) host.counts[s] += c.counts[s];
       host.members.push(...c.members);
       host.newest = Math.max(host.newest, c.newest);
       if (c.minEta !== undefined) host.minEta = Math.min(host.minEta ?? Infinity, c.minEta);
     }
-    this.clusters = placed.slice(0, MAX_BUBBLES);
+    // 数量上限：按紧急程度、再按离相机的距离排序，只取前 maxVisible 个
+    placed.sort((a, b) => PRIORITY[a.top.state] - PRIORITY[b.top.state] || a.dist - b.dist);
+    this.clusters = placed.slice(0, Math.min(this.maxVisible, MAX_BUBBLES));
+    const count = `${this.clusters.length}/${placed.length}`;
+    if (count !== this.lastCount) {
+      this.lastCount = count;
+      this.onCount?.(this.clusters.length, placed.length);
+    }
 
     const now = performance.now();
     this.clusters.forEach((c, i) => {
@@ -132,6 +159,8 @@ export class HomeAlerts {
       const pop = this.reduced || t >= 1 ? 1 : popCurve(t);
       el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%) scale(${pop.toFixed(3)})`;
       el.style.zIndex = String(MAX_BUBBLES - i);
+      // 接近距离上限时淡出
+      el.style.opacity = String(1 - 0.85 * smoothstep(range * 0.75, range, c.dist));
       const sig = `${c.top.state}|${c.n}|${c.counts.burning}|${c.counts.threat}|${c.counts.burned}|${c.minEta === undefined ? "" : Math.round(c.minEta / 5)}`;
       if (el.dataset.sig !== sig) {
         el.dataset.sig = sig;
@@ -193,6 +222,11 @@ export class HomeAlerts {
     rows.push(["", "Click to zoom in"]);
     return { title: `${c.n} homes`, rows };
   }
+}
+
+function smoothstep(a: number, b: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
 }
 
 /** 弹出：先放大越过 1 再回落（easeOutBack） */
