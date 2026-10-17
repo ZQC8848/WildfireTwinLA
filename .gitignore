@@ -15,3 +15,7 @@ data/cache/
 .env.*
 
 .DS_Store
+
+# 前端
+web/public/data/*
+!web/public/data/.gitkeep
