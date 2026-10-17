@@ -96,7 +96,18 @@ web/
 - 状态接口：`uState`（P2 的状态纹理，R 通道 0/1/2）+ `uUseState`。P2 完成前用"Burn preview"圆环验证，地形与模型共用同一组预览参数。
 - 调试：`?cam=x,y,z,tx,ty,tz` 指定相机，`?burn=<半径>` 直接显示燃烧预览。
 
+### P2 GPU 元胞自动机（单次模拟）
 
+> **状态：已完成**（分支 `a/p2-fire-sim`），实现见 `web/src/sim/`：
+> - `shaders.ts`：Alexandridis 规则加飞火（沿上风方向按对数正态距离采样，建筑只能被飞火点燃），随机数用 PCG 整数哈希。
+> - `fireSim.ts`：两张 RGBA32F 渲染目标交替更新（ping-pong），按掩膜点火，异步读回统计燃烧格、受影响面积和受波及的建筑格。
+> - `wind.ts`：按 core 的新 `WindField`（单一风况或 W×H 采样）生成风场纹理，在速度分量上双线性插值，与 `core.windAt` 一致。
+> - `cpuReference.ts`：规则与随机数完全相同的 CPU 实现。合成网格上跑 80 步对照：GPU 62,840 格，CPU 62,806 格，IoU 99.7%。
+> - 地形与模型直接读取状态纹理 `uState`，取代燃烧预览。
+> - 交互：点击地形点火；运行、单步、重置；调节步速、风速、风向、飞火开关、随机种子；"Check against CPU" 按钮。
+> - 调试 URL：`?wind=速度,来向&ignite=x,y&steps=N`，`?cpucheck=N`。
+>
+> 与原计划的差异：没有用 `GPUComputationRenderer`，改为自写 ping-pong（`FullScreenQuad` 加两个渲染目标），因为点火和重置需要额外的绘制通道。
 
 **目标**：在地形上看到火按坡度、风、燃料蔓延。
 
