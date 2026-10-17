@@ -2,8 +2,13 @@
 // 用途：1) 验证 GPU 实现的正确性；2) P3 的 CPU / GPU 性能对比。
 // GPU 用 float32、CPU 用 float64 计算概率，极少数临界格子会因舍入不同而分岔，所以对照看统计量而不是逐格相等。
 
-import { SpreadParams, TreatmentEffect, type Grid, type WindField } from "@core";
-import { windGrid } from "./wind";
+import {
+  SpreadParams,
+  TreatmentEffect,
+  type Grid,
+  type WindField,
+} from "../../../packages/core/src/index.ts";
+import { windGrid } from "./wind.ts";
 
 function pcg(v: number): number {
   const state = (Math.imul(v >>> 0, 747796405) + 2891336453) >>> 0;

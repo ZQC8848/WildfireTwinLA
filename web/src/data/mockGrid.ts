@@ -2,7 +2,7 @@
 // 地理位置放在 Norte Fire 的范围（docs/norte-fire.md），回放的火点按经纬度落到这张网格上；
 // 地形本身是合成的（北侧山地、南侧有建筑的平原），不代表 San Juan Capistrano 的真实地形。
 
-import { NORTE_BBOX } from "./norte";
+import { NORTE_BBOX } from "./norte.ts";
 import {
   CellClass,
   GRID_CHANNELS,
@@ -13,7 +13,7 @@ import {
   type Community,
   type Grid,
   type GridMeta,
-} from "@core";
+} from "../../../packages/core/src/index.ts";
 
 export interface GridBundle {
   grid: Grid;

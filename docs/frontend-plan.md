@@ -185,7 +185,7 @@ web/
 
 ### P5 实时数据与回放
 
-**目标**：接入后端事件流，支持 live 与 Eaton replay 两种模式。
+**目标**：接入后端事件流，支持 live 与 Norte replay 两种模式。
 
 - `socket.ts`：连接后端 WebSocket，按 `ServerMsg` 类型分发；断线自动重连。`mockServer.ts` 在后端未就绪时按固定节奏模拟同样的消息。
 - `hotspots`：用 InstancedMesh 在地形上显示火点（颜色按来源，大小按 FRP）；同时把对应格子注入单次模拟与集合预报的初始状态（同化）。
@@ -201,10 +201,10 @@ web/
 > - `net/feed.ts`：连接后端 WebSocket。live 模式断线后指数退避重连、每 20 秒 ping；replay 模式在后端不可用时改为在浏览器内播放仓库里的 `server/data/eaton-replay.jsonl`（与后端读的是同一份文件）。后端地址：`?api=` > `VITE_API_URL` > `http://localhost:8010`。
 > - `net/messages.ts`：规范化消息。风兼容旧格式 `grid5x5`（后端目前由南向北，翻转为由北向南）与新格式 `{width, height, samples}`；火点按经纬度用前端网格重新换算格子，不依赖后端的格子号。
 > - `realtime/controller.ts`：火点画成标记（`scene/hotspots.ts`）并在模拟中点火；回放时先把模拟推进到火点的观测时刻（单次最多 24 小时）。风更新来流；官方火界画成对照轮廓并计算与模拟火场的 IoU；模型告警（标注 not official）、官方疏散令、外呼状态进入事件流与外呼统计。
-> - Respond 侧栏：数据源切换（Simulation / Live feed / Eaton replay）、连接状态、火点数、官方火界面积与重合度、外呼统计；顶栏显示当前数据源。
+> - Respond 侧栏：数据源切换（Simulation / Live feed / Norte replay）、连接状态、火点数、官方火界面积与重合度、外呼统计；顶栏显示当前数据源。
 > - 调试 URL：`?feed=live|replay`、`?api=`。
 >
-> 数据现状：`eaton-replay.jsonl` 仍是 4 条事件的演示种子（1 个火点 + 1 组风）。Tia 的 `wildfire-eaton-replay` 可以生成 Eaton 最终官方火界，但没有带时间的火点序列；要做有说服力的回放，需要 2025-01-07/08 的 FIRMS 存档火点。
+> 数据现状：`norte-replay.jsonl` 已包含两处报告起火、四次 VIIRS 过境、逐小时 HRRR 和五个官方疏散区命令。WFIGS 尚未发布 Norte 最终火界，因此 IoU 必须保持待定，不能用热点外包络代替。
 
 ### P6 视觉与场景完整度
 
@@ -247,7 +247,7 @@ web/
 
 **目标**：串起完整演示流程并可公开访问。
 
-- Demo 脚本（与 pitch 对应）：全景与燃料图层 → Eaton 回放与真实火界对比 → 画防火带并与算法方案比较 → 拉高风速展示飞火与预算转向 Zone 0 → 实时模式与告警、外呼状态。
+- Demo 脚本（与 pitch 对应）：全景与燃料图层 → Norte 公共数据回放与卫星/模型对比 → 画防火带并与算法方案比较 → 拉高风速展示飞火与预算转向 Zone 0 → 实时模式与告警、外呼状态。
 - 一键切换 demo 状态（预设场景、预设风况、预设处理方案），避免现场手动操作出错。
 - 性能检查：集合预报耗时、帧率、显存；必要时降低集合规模或粒子数。
 - `vite build`，部署为静态站点（如 Vercel）；后端地址通过环境变量配置。
@@ -263,7 +263,7 @@ web/
 | P1 | Tia | 真实 `grid.bin`、卫星底图 | mock 网格 |
 | P2–P3 | Lucia | 标定后的 `stepMinutes` 等参数 | 用文献默认值 |
 | P4 | Lucia | Worker 中的 `planTreatments`、`evaluate` 真实现 | 约定中的假实现 |
-| P5 | Tia | WebSocket 服务、Eaton replay 数据 | `mockServer.ts` |
+| P5 | Tia | WebSocket 服务、Norte replay 数据 | `mockServer.ts` |
 | P6 | Tia | `buildings.json` | mock 建筑 |
 
 ## 提交约定

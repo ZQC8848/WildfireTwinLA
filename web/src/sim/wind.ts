@@ -3,7 +3,7 @@
 // 与 core 的 windAt 一致，插值在速度分量上进行，所以 shader 里做手动双线性插值。
 
 import * as THREE from "three";
-import type { Wind, WindField } from "@core";
+import type { Wind, WindField } from "../../../packages/core/src/index.ts";
 
 /** 气象惯例的"来向"角 → 网格坐标下的速度分量 [向东, 向南] */
 export function windToGrid(w: Wind): [number, number] {

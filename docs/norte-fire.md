@@ -115,7 +115,8 @@ Use the real city names. Give each one an `approx: true` property, or put "appro
 
 **B6. Optional: reported damage.** Mark the buildings on Avenida Calita, Via La Mirada and Via De Agua as `reportedDamageArea: true` in `buildings.json`. That is a street-level area, not a confirmed per-house list. The frontend will draw it as a comparison layer.
 
-Issue #6 (WindNinja library) still applies, now for the new bbox. Issue #11 (Eaton data) is superseded by this doc.
+Issue #6 is implemented for this bbox by `wildfire-wind-library` and
+`web/public/data/wind/`. Issue #11 (Eaton data) is superseded by this doc.
 
 ### C: Lucia (algorithms and validation)
 
@@ -148,21 +149,20 @@ Issue #6 (WindNinja library) still applies, now for the new bbox. Issue #11 (Eat
 Done on `a/norte-frontend`:
 
 - The UI says Norte and requests `event=norte`.
-- Until `server/data/norte-replay.jsonl` exists, the frontend builds the same event stream in the browser from `data/norte/raw/` (`web/src/net/norteSeed.ts`): both reported ignitions, four VIIRS passes with the landfill filtered out, and hourly HRRR. It switches to Tia's file automatically once that file is on main.
+- The frontend uses `server/data/norte-replay.jsonl`: both reported ignitions, four VIIRS passes with the landfill filtered out, hourly HRRR and official orders. `web/src/net/norteSeed.ts` remains only as a build-time fallback.
 - The replay clock described in B3, and a pause at the end of the replay.
 - Satellite vs model comparison. Before each pass is assimilated, it checks whether the model had already burned within 200 m of each pixel. Missed pixels turn blue. The panel shows "pixels the model had reached" and "model fire near a detection".
 - Timeline ticks for satellite passes (blue) and reported ignitions (white).
 - Plan defaults to the NORTE ignition and 8.5 m/s from 75°.
-- The synthetic `?mock` grid is placed on the Norte bbox, so replay hotspots land on it before the real grid exists.
+- The committed real grid is the default; the synthetic `?mock` grid remains a deliberate test fallback on the same bbox.
 
-Still to do: the reported-damage layer (needs B6), "approximate" labels on communities (needs B2), and checking everything on the real grid.
+Still to do: the optional reported-damage layer (B6) and final-perimeter comparison once an
+authoritative perimeter or post-fire dNBR product exists. Approximate community labels and the
+real-grid integration are complete.
 
-- Rename Eaton to Norte in the UI and request `event=norte`. The bundled local replay switches to `norte-replay.jsonl`.
-- Make the Plan default scenario NORTE plus the 10-16 wind.
-- Timeline: tick marks for the satellite passes and both ignitions.
-- A "simulation vs satellite" layer: VIIRS pixels the model missed, and model fire with no detection.
-- A reported-damage comparison layer (B6) and an "approximate zones" label on communities.
-- A clear label everywhere that this is an after-the-fact replay from public data, not an official product.
+The UI requests `event=norte`, defaults Plan to the NORTE ignition and 10-16 wind, shows replay
+timeline ticks and satellite/model comparison, and labels approximate communities. It must keep
+the after-the-fact, non-official data disclaimer visible.
 
 ## 6. Contracts
 

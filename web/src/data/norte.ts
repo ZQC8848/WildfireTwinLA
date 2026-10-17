@@ -1,7 +1,9 @@
 // Norte Fire（2026-10-16，南橙县）：演示区域、两处报告起火点与 Plan 的默认情景。见 docs/norte-fire.md。
 
-import { lonLatToCell, type GridMeta } from "@core";
-import incidents from "../../../data/norte/raw/wfigs_incidents_2026-10-17.json";
+import { lonLatToCell, type GridMeta } from "../../../packages/core/src/index.ts";
+import incidents from "../../../data/norte/raw/wfigs_incidents_2026-10-17.json" with {
+  type: "json",
+};
 
 /** 目标范围（WGS84）：以 33.485, −117.645 为中心的 12.8 km 方框 */
 export const NORTE_BBOX: [number, number, number, number] = [-117.714, 33.427, -117.576, 33.543];
