@@ -8,14 +8,15 @@
 
 Module B now has a runnable offline GIS package and a runnable FastAPI service. The delivered code covers the main vertical path from source data to normalized hotspots, incidents, live messages, modeled alerts, resident consent, and Retell call state.
 
-It is **not yet fully compliant** with every promise in the root README and the frozen contract in `docs/team-plan.md`. The largest integration gaps are:
+The hardening pass closed the main data and wire-contract gaps: the pipeline can download USGS DEM and OSM buildings, generate `communities.json`, use Sentinel B8A for NDMI, and build an Eaton perimeter replay; the server now emits the frozen WebSocket fields, decodes NOAA GOES-18 ABI-L2-FDCC directly, accepts batch risk results, polls CAP official-order feeds, and protects resident revocation with a secret token.
 
-1. the WebSocket envelope and field names differ from the frozen TypeScript contract;
-2. `mode=replay&event=eaton` is accepted but does not replay an Eaton dataset;
-3. GOES is consumed through FIRMS `GOES_NRT`, not directly from NOAA GOES-18 ABI-L2-FDCC;
-4. official evacuation orders are not ingested or distinguished from modeled alerts;
-5. the data pipeline aligns supplied files, but does not yet download DEM/building sources or generate `communities.json`;
-6. the backend accepts arrival-risk results over REST instead of invoking the shared deterministic planner directly.
+It is **not yet production-complete**. The remaining external or cross-module gaps are:
+
+1. the bundled Eaton file is a fast demonstration seed; the authoritative perimeter replay must be generated for the final grid, and a full time-series/IoU replay still depends on historical detection data;
+2. module C is connected through a tested batch API rather than being embedded in the Python process;
+3. Retell requires credentials and approved test numbers before its live path can be verified;
+4. an authoritative CAP feed URL and community mapping must be configured for deployment;
+5. PII encryption at rest and distributed rate limiting remain production tasks.
 
 These gaps do not invalidate the current MVP, but they must be resolved before claiming full README compliance or plug-and-play integration with modules A and C.
 
@@ -89,6 +90,7 @@ gantt
     Backend design and FastAPI skeleton  :milestone, m3, 2026-10-16 20:30, 0m
     Full GIS and realtime implementation :milestone, m4, 2026-10-16 20:49, 0m
     Compliance audit                     :milestone, m5, 2026-10-16 20:54, 0m
+    Contract and production hardening    :milestone, m6, 2026-10-16 21:05, 0m
 ```
 
 Recommended path from the current MVP to a README-compliant demo:
@@ -121,19 +123,19 @@ Status meanings:
 
 | Requirement | Status | Evidence | Gap or action required |
 |---|---|---|---|
-| DEM, Sentinel-2, and buildings aligned to one grid | **Partial** | `data-pipeline/wildfire_grid/cli.py`; end-to-end raster test | Alignment is implemented for supplied inputs. Add DEM/building download commands, road/water masks, LANDFIRE support, and `communities.json`. |
-| Sentinel-2 L2A discovery and NDVI/NDMI/SCL processing | **Partial** | `wildfire_grid/sentinel.py` and `cli.py` | Scene discovery and processing work, but periodic refresh is not scheduled and B8A is not separately supported for NDMI. |
+| DEM, Sentinel-2, buildings, and communities aligned to one grid | **Compliant for MVP** | `cli.py`, `sources.py`, `communities.py`; end-to-end tests | USGS and OSM source commands plus the frozen outputs are implemented. LANDFIRE and road/water masks remain optional enhancements. |
+| Sentinel-2 L2A discovery and NDVI/NDMI/SCL processing | **Compliant for offline runs** | `sentinel.py` and `cli.py` | B04/B08/B8A/B11/SCL are supported. Schedule the CLI externally when periodic refresh is required. |
 | NASA FIRMS VIIRS/MODIS polling | **Compliant** | `server/app/providers/firms.py`; provider tests | Requires a deployment FIRMS map key, as intended. |
-| GOES-18 ABI FDC polling every five minutes | **Partial** | FIRMS adapter requests `GOES_NRT` | This is an aggregated FIRMS product, not a direct NOAA ABI-L2-FDCC object reader. Add a direct adapter if the README must be literal. |
+| GOES-18 ABI FDC polling every five minutes | **Compliant** | `providers/goes.py`; generated NetCDF test; public NOAA smoke test | Direct S3 discovery, fixed-grid reprojection, fire-mask decoding, FRP, confidence, and bbox filtering are implemented. |
 | Wind polling | **Compliant** | `server/app/providers/weather.py`; 5×5 grid test | Open-Meteo is implemented; NWS is an optional alternate source, not required for the MVP. |
 | Hotspot dedupe and event clustering | **Compliant** | `store.py`, `clustering.py`, `service.py`; clustering/store tests | Current in-process algorithm is suitable for the MVP; production scale needs PostGIS or a spatial index. |
-| Live WebSocket delivery | **Partial** | `/ws?mode=live`, `RealtimeHub`, API integration test | Delivery works, but messages use `{type, sequence, emitted_at, data}`. The frozen team contract expects top-level fields, singular `incident`, `t`, `conf`, and hotspot `cell`. Choose one schema and add shared contract tests. |
-| Eaton replay using the same frontend contract | **Missing** | Route validation accepts `mode=replay&event=eaton` | No replay dataset, clock, or replay event publisher is connected. |
-| Alert evaluation from deterministic arrival results | **Partial** | `POST /api/v1/risks/evaluate`, `alerts.py` | Rules and persistence work. The backend does not directly call the shared TypeScript planner; module C must POST results or an adapter must be added. |
+| Live WebSocket delivery | **Compliant** | `contracts.py`, `/ws?mode=live`, contract and API tests | Frozen top-level fields are emitted, with additive `sequence` and `emittedAt` metadata for reconnect safety. |
+| Eaton replay using the same frontend contract | **Partial** | `replay.py`, bundled seed, `wildfire-eaton-replay` | Streaming and authoritative final-perimeter generation work. A historical hotspot/perimeter time series is still needed for IoU validation. |
+| Alert evaluation from deterministic arrival results | **Compliant at the service boundary** | single and batch risk endpoints; alert tests | Module C can POST deterministic scenario outputs in one batch. Direct in-process TypeScript invocation is intentionally avoided. |
 | Retell calls for opted-in residents and result writeback | **Partial** | `retell.py`, `service.py`, signed webhook route | Code path is complete and idempotent, but live calls were not executed because no credentials/test numbers were provided. |
 | Model output clearly marked non-official | **Compliant** | Alert WS payload and Retell variables include `non_official` | Keep this label visible in every frontend alert and spoken call script. |
-| Relay and prioritize official evacuation orders | **Missing** | No official-order provider or schema | Add CAL FIRE/Genasys/LA County ingestion, an `official_order` record, and precedence rules above model predictions. |
-| Opt-in-only resident registry | **Compliant for MVP** | Pydantic requires `consent: true`; revoke endpoint and tests | Before production, add authenticated revocation, encryption at rest, retention rules, rate limits, and a legal review of call consent. |
+| Relay and prioritize official evacuation orders | **Partial** | CAP poller, official-order store/API, `official_order` WS event with `official: true` | Storage and a separate authoritative channel exist. Configure an approved feed and enforce frontend precedence; automated official-order calls require policy approval. |
+| Opt-in-only resident registry | **Compliant for MVP** | Consent validation, secret revocation token, rate limit, security headers, tests | Before production, add encryption at rest, shared/distributed rate limiting, retention automation, and legal review. |
 | Crisis operation when the network is unavailable | **Partial / cross-module** | SQLite retains last successful realtime state | The README promises cached scenario playback. That requires precomputed scenarios from C and PWA caching from A; Module B does not yet publish a scenario catalog. |
 
 ### Other README features outside Module B
@@ -142,42 +144,30 @@ The following root README features are owned by A or C and were not evaluated as
 
 ## 5. Interface differences that should be fixed first
 
-The current live hotspot message is effectively:
+The current live hotspot message is:
 
 ```json
 {
   "type": "hotspots",
   "sequence": 1,
-  "emitted_at": "2026-10-17T03:49:00Z",
-  "data": {
-    "items": [
-      {
-        "id": "...",
-        "source": "VIIRS",
-        "lat": 34.2,
-        "lon": -118.1,
-        "acquired_at": "2026-10-17T03:45:00Z",
-        "frp": 12.5,
-        "confidence": 0.9
-      }
-    ]
-  }
+  "emittedAt": "2026-10-17T03:49:00Z",
+  "items": [{
+    "id": "...", "cell": 74588, "source": "VIIRS",
+    "lat": 34.2, "lon": -118.1, "t": "2026-10-17T03:45:00Z",
+    "frp": 12.5, "conf": 0.9
+  }]
 }
 ```
 
-The frozen team contract expects `items` at the top level and uses `t`, `conf`, and `cell`. Before frontend integration, the team should either:
-
-1. change the server serializer to the existing TypeScript contract; or
-2. update `docs/team-plan.md` and shared TypeScript types to adopt the sequenced envelope.
-
-The second option preserves reconnect detection through `sequence`, but it requires explicit agreement from modules A and C because the team plan marks the interface as frozen.
+This now matches the frozen team fields. `cell` uses the same EPSG:32611 bounds and north-to-south row order as the offline grid. `sequence` and `emittedAt` are additive metadata; TypeScript consumers may ignore them or use them to detect gaps.
 
 ## 6. Verification performed
 
 | Package | Verification | Result |
 |---|---|---|
-| Realtime server | Ruff plus unit/integration tests | 15 tests passed |
-| Offline GIS pipeline | Installed CLI entry points, Ruff, unit/end-to-end raster tests | 3 tests passed |
+| Realtime server | Ruff plus unit/integration tests | 22 tests passed |
+| Offline GIS pipeline | Five installed CLI entry points, Ruff, unit/end-to-end tests | 6 tests passed |
+| Direct GOES | Public NOAA GOES-18 object discovery and NetCDF decode | Passed; latest object decoded successfully |
 | Secrets | Pattern scan and `.env.example` review | No committed credentials found |
 | Git state | Local/remote revision comparison | Branch and remote matched at `2794ba1` before this report |
 
@@ -185,10 +175,10 @@ The automated suite uses mocked provider responses and synthetic rasters. It doe
 
 ## 7. Acceptance checklist for full Module B completion
 
-- [ ] A shared schema test passes in both the Python server and TypeScript client.
-- [ ] Eaton replay emits deterministic events through the same schema as live mode.
-- [ ] A generated `communities.json` maps community IDs to grid cells.
-- [ ] Module C arrival output reaches the alert API in an end-to-end test.
+- [x] Python contract tests cover the frozen WebSocket field shape; add the same fixture to the TypeScript client when it lands.
+- [x] Eaton replay emits deterministic events through the same schema as live mode.
+- [x] A generated `communities.json` maps community IDs to grid cells.
+- [x] The batch arrival-risk boundary is covered by an API integration test.
 - [ ] Official orders are stored and always take precedence over modeled alerts.
 - [ ] One staging run records live FIRMS, GOES, wind, WebSocket, and Retell evidence.
 - [ ] Resident endpoints have abuse controls and production PII protection.

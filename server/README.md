@@ -23,15 +23,23 @@ pytest -q
 Pollers default to disabled so local runs do not require external credentials. To enable the
 live backend, set `WILDFIRE_ENABLE_POLLERS=true` and provide a NASA FIRMS map key. FIRMS
 VIIRS/MODIS and GOES NRT are normalized to the same hotspot model; Open-Meteo provides a
-5×5 wind field. Configure the three `WILDFIRE_RETELL_*` values to enable calls.
+5×5 wind field. Set `WILDFIRE_ENABLE_DIRECT_GOES=true` to decode NOAA GOES-18
+ABI-L2-FDCC NetCDF directly. Configure the three `WILDFIRE_RETELL_*` values to enable calls.
 
 Useful integration points:
 
 - `GET /readyz` reports provider watermarks and whether Retell is configured.
 - `WS /ws?mode=live` sends a snapshot followed by sequenced hotspot, incident, wind and alert events.
 - `POST /api/v1/risks/evaluate` consumes the simulator's community arrival probabilities.
+- `POST /api/v1/risks/evaluate-batch` is the integration point for module C scenarios.
+- `GET/POST /api/v1/official-orders` stores authoritative orders separately and pushes them with `official: true`.
 - `POST /api/v1/residents` and `DELETE /api/v1/residents/{id}` implement opt-in and revocation.
 - `POST /webhooks/retell` verifies Retell signatures and stores call outcomes.
+- `GET /metrics` exports Prometheus-compatible service counts.
+
+Registration returns a one-time `revoke_token`; clients must retain it and send it as
+`X-Revocation-Token` when deleting a registration. Internal ingestion endpoints accept
+`X-Internal-Key`, which is mandatory when `WILDFIRE_ENV=production`.
 
 This service is a non-official decision-support system. Do not represent its modeled alerts as
 government evacuation orders.

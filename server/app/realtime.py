@@ -1,8 +1,9 @@
 import asyncio
+from datetime import UTC, datetime
 
 from fastapi import WebSocket
 
-from .schemas import ServerMessage
+from .contracts import envelope
 
 
 class RealtimeHub:
@@ -14,6 +15,10 @@ class RealtimeHub:
     @property
     def sequence(self) -> int:
         return self._sequence
+
+    @property
+    def client_count(self) -> int:
+        return len(self._clients)
 
     async def connect(self, websocket: WebSocket) -> None:
         await websocket.accept()
@@ -28,14 +33,12 @@ class RealtimeHub:
         async with self._lock:
             self._sequence += 1
             clients = tuple(self._clients)
-            payload = ServerMessage(
-                type=message_type, sequence=self._sequence, data=data
-            ).model_dump_json()
+            payload = envelope(message_type, self._sequence, data, datetime.now(UTC))
 
         failed: list[WebSocket] = []
         for client in clients:
             try:
-                await client.send_text(payload)
+                await client.send_json(payload)
             except (OSError, RuntimeError):
                 failed.append(client)
         if failed:

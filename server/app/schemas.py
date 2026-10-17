@@ -65,6 +65,7 @@ class ResidentCreated(BaseModel):
     id: str
     phone_masked: str
     consent_at: datetime
+    revoke_token: str
 
 
 class ArrivalRisk(BaseModel):
@@ -84,6 +85,21 @@ class AlertResult(BaseModel):
     changed: bool
     calls_queued: int = 0
     reason: str
+
+
+class OfficialOrderCreate(BaseModel):
+    id: str = Field(min_length=1, max_length=120)
+    community_id: str = Field(min_length=1, max_length=120)
+    level: Literal["warning", "order", "shelter"]
+    headline: str = Field(min_length=1, max_length=300)
+    source: str = Field(min_length=1, max_length=120)
+    source_url: str | None = None
+    issued_at: datetime
+    expires_at: datetime | None = None
+
+
+class OfficialOrder(OfficialOrderCreate):
+    received_at: datetime
 
 
 class RetellWebhookEvent(BaseModel):

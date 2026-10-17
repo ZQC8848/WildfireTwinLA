@@ -102,9 +102,11 @@ def build_grid(args: argparse.Namespace) -> None:
         fuel = np.clip((ndvi - 0.15) / 0.6, 0, 1)
     else:
         fuel = np.zeros_like(elevation)
-    if args.swir and args.nir:
+    moisture_nir = args.nir_narrow or args.nir
+    if args.swir and moisture_nir:
         swir = read_band(args.swir, **read_options)
-        ndmi = normalized_difference(nir, swir)
+        moisture = read_band(moisture_nir, **read_options)
+        ndmi = normalized_difference(moisture, swir)
         dryness = np.clip((0.3 - ndmi) / 0.5, 0, 1)
     else:
         dryness = np.full_like(elevation, 0.5)
@@ -149,6 +151,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--dem", required=True)
     result.add_argument("--red")
     result.add_argument("--nir")
+    result.add_argument("--nir-narrow", help="Sentinel-2 B8A band used for NDMI")
     result.add_argument("--swir")
     result.add_argument("--scl")
     result.add_argument("--buildings")
