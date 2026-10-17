@@ -1,7 +1,7 @@
 import "./style.css";
 import * as THREE from "three";
 import GUI from "lil-gui";
-import { CellClass, GRID_CHANNELS } from "@core";
+import { CellClass, GRID_CHANNELS, SpreadParams } from "@core";
 import type { WindField } from "@core";
 import { loadGrid } from "./data/loadGrid";
 import { TerrainPicker } from "./interact/picking";
@@ -286,6 +286,8 @@ ctx.onFrame((dt) => {
   // 每步之后状态纹理会换成另一张，所以每帧都重新指向当前那张
   propMaterial.uniforms.uState.value = sim.texture;
   terrain.uniforms.uState.value = sim.texture;
+  terrain.uniforms.uSimMinutes.value = sim.minutes;
+  terrain.uniforms.uStepMinutes.value = SpreadParams.stepMinutes;
   props.update(ctx.camera);
   smoke.update(dt, propMaterial.uniforms.uTime.value);
 

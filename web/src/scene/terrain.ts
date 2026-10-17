@@ -67,6 +67,8 @@ uniform float uNight; // 0 白天（Plan）到 1 夜间（Respond）
 uniform sampler2D uWater; // R 河岸有向距离（米），G 路缘有向距离（米），BA 水流方向
 uniform vec3 uSkyColor;   // 水面反射的天空颜色，随模式变化
 uniform float uWaterTime;
+uniform float uSimMinutes; // 当前模拟时间（分钟）
+uniform float uStepMinutes; // 每步分钟数
 uniform sampler2D uState; // 火势模拟状态：R = 0 未燃 / 1 燃烧中 / 2 已燃尽
 uniform bool uUseState;
 uniform bool uBurnOn;
@@ -235,22 +237,48 @@ void main() {
   // 火势状态：燃尽为灰黑，燃烧处发光。双线性混合四个格子，火场边缘不出现方格锯齿
   float burnGlow = 0.0;
   if (uUseState) {
+    // 用着火时刻（状态纹理 B 通道）的等值线画火线，代替逐格混合，火场边缘是平滑而不规则的曲线。
+    // 两套插值：front 决定"火线在哪里"，已烧格的到达时间钳在当前时间 2 步以内，
+    //   这样火线停住时（遇到防火带、河岸）显示边界最多停在两格中点，不会在视觉上继续往前爬；
+    // age 决定"着火后多久"，用真实的到达时间，用于燃烧带、余烬、焦黑的分层着色。
+    float T = uSimMinutes;
+    float S = uStepMinutes;
     vec2 f = fract(vCell);
     ivec2 c0 = ivec2(floor(vCell));
-    float burned = 0.0;
-    float burning = 0.0;
+    float front = 0.0;
+    float arr = 0.0;
     for (int j = 0; j < 2; j++) {
       for (int i = 0; i < 2; i++) {
         ivec2 cc = clamp(c0 + ivec2(i, j), ivec2(0), ivec2(uGridSize) - 1);
-        float st = texelFetch(uState, cc, 0).r;
+        vec4 st = texelFetch(uState, cc, 0);
         float wgt = (i == 1 ? f.x : 1.0 - f.x) * (j == 1 ? f.y : 1.0 - f.y);
-        burned += wgt * step(1.5, st);
-        burning += wgt * step(0.5, st) * (1.0 - step(1.5, st));
+        bool lit = st.r > 0.5;
+        front += wgt * (lit ? max(st.b, T - 2.0 * S) : T + 2.0 * S);
+        arr += wgt * (lit ? st.b : T);
       }
     }
-    col = mix(col, vec3(0.06, 0.055, 0.05), (burned + burning) * 0.85);
+    // 两层噪声扰动阈值，火线有指状突出与凹湾，而不是光滑的等值线
+    float wobble = (vnoise(vWorldXZ * 0.022) - 0.5) * 1.6 * S + (vnoise(vWorldXZ * 0.085 + 3.1) - 0.5) * 0.7 * S;
+    float edge = T - front + wobble;
+    float aa = fwidth(edge) * 0.75 + 1e-3;
+    float inside = smoothstep(-aa, aa, edge) * (1.0 - max(water, road));
+    float age = max(T - arr + wobble, 0.0);
+    // 燃烧持续时间与模拟规则一致：植被 2 + 3×燃料 步，建筑 8 步
+    float dur = mix((2.0 + 3.0 * fuel) * S, 8.0 * S, vb.y);
+    float burning = inside * (1.0 - smoothstep(dur * 0.65, dur, age));
+    // 刚烧过的地方是暗红余烬，随后冷却成焦黑
+    vec3 ember = vec3(0.2, 0.06, 0.02);
+    vec3 charcoal = vec3(0.055, 0.05, 0.045);
+    vec3 burnt = mix(ember, charcoal, smoothstep(dur, dur * 3.0, age));
+    col = mix(col, burnt, inside * 0.9);
     float flick = 0.35 + 0.65 * vnoise(vWorldXZ * 0.03 + vec2(uTime * 0.9, -uTime * 0.6)) * (0.6 + 0.4 * vnoise(vWorldXZ * 0.11 - uTime * 2.3));
-    burnGlow = burning * flick;
+    // 最外缘（刚着火）最亮；燃烧带内部是随时间流动的斑驳火团，团与团之间是暗红的燃烧地面
+    float leading = 1.0 - smoothstep(0.0, 1.5 * S, age);
+    float patches = smoothstep(0.35, 0.8, vnoise(vWorldXZ * 0.06 + vec2(uTime * 0.35, -uTime * 0.25)));
+    burnGlow = burning * flick * (0.95 * leading + (1.0 - leading) * patches * 0.6);
+    // 余烬中零星的火星
+    float spark = step(0.86, vnoise(vWorldXZ * 0.25 + uTime * 0.4)) * inside * (1.0 - smoothstep(dur, dur * 2.5, age));
+    burnGlow += spark * 0.35 * flick;
   } else if (uBurnOn && w.x < 0.5) { // 河流与道路不参与燃烧预览
     float d = length(vWorldXZ - uBurn.xy);
     if (d < uBurn.z - uBurn.w) {
@@ -272,7 +300,8 @@ void main() {
     col = mix(col * 1.25, vec3(1.0, 0.85, 0.2), edge);
   }
 
-  col += vec3(1.0, 0.4, 0.06) * burnGlow * 1.6;
+  // 白天火光收敛，夜间（Respond）完全亮起；颜色偏深橙，避免叠加后饱和成黄白
+  col += vec3(1.0, 0.36, 0.05) * burnGlow * mix(0.9, 1.6, uNight);
   gl_FragColor = vec4(col, 1.0);
   #include <colorspace_fragment>
   #include <fog_fragment>
@@ -338,6 +367,8 @@ export class Terrain {
           uWater: { value: null },
           uSkyColor: { value: new THREE.Color("#d4d8cf") },
           uWaterTime: { value: 0 },
+          uSimMinutes: { value: 0 },
+          uStepMinutes: { value: 5 },
           uState: { value: null },
           uUseState: { value: false },
           uBurnOn: { value: false },
