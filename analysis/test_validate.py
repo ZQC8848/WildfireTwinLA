@@ -1,0 +1,27 @@
+{
+  "label": "SYNTHETIC TEST ONLY \u2014 NOT EATON",
+  "calibration": {
+    "stepMinutes": 5.0,
+    "detectionProxyMAEMinutes": 0.0,
+    "samplesUsed": 2,
+    "samplesExcluded": 0
+  },
+  "warning": "Detection times are delayed proxies; use temporally held-out observations and timestamp-matched perimeters.",
+  "heldOut": {
+    "stepMinutes": 5.0,
+    "detectionProxyMAEMinutes": 2.0,
+    "samplesUsed": 1,
+    "samplesExcluded": 0
+  },
+  "perimeters": [
+    {
+      "minutes": 10,
+      "iou": 1.0
+    }
+  ],
+  "cpuGpu": {
+    "pairedCells": 4,
+    "arrivalMAEMinutes": 0.75,
+    "reachabilityDisagreements": 0
+  }
+}
