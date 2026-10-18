@@ -21,9 +21,11 @@ function localReplay(): { events: any[]; bundled: boolean } {
 export type FeedMode = "off" | "live" | "replay";
 export type FeedState = "idle" | "connecting" | "connected" | "local" | "retrying" | "ended";
 
-// 后端地址：URL 参数 ?api= 优先（调试），其次构建时的 VITE_API_URL，默认本地 8010
-export const API =
-  new URLSearchParams(location.search).get("api") ?? (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8010";
+// 后端地址：URL 参数 ?api= 优先（调试），其次构建时的 VITE_API_URL；开发时默认本地 8010。
+// 正式构建没有配置后端时为 null：不发任何后端请求，回放在浏览器内播放，紧急联络在 Web Worker 里模拟
+// （公开网站若去连访客自己电脑上的 localhost，会失败，新版 Chrome 还可能弹出本地网络权限提示）
+export const API: string | null =
+  new URLSearchParams(location.search).get("api") || (import.meta.env.VITE_API_URL as string | undefined) || (import.meta.env.DEV ? "http://localhost:8010" : null);
 
 export class FeedClient {
   mode: FeedMode = "off";
@@ -75,7 +77,7 @@ export class FeedClient {
   }
 
   private wsUrl(): string {
-    const base = API.replace(/^http/, "ws");
+    const base = (API ?? "").replace(/^http/, "ws");
     return this.mode === "live"
       ? `${base}/ws?mode=live`
       : `${base}/ws?mode=replay&event=norte&speed=${this.replaySpeed}&start=${this.startOffset.toFixed(3)}`;
@@ -83,6 +85,11 @@ export class FeedClient {
 
   private open() {
     const gen = this.generation;
+    if (!API) {
+      // 没有后端：回放直接在浏览器内播放；实时数据不可用（界面上按钮已禁用）
+      if (this.mode === "replay") return this.playLocal(gen);
+      return this.setState("ended", "The live feed needs a backend; this public demo replays recorded public data.");
+    }
     this.setState("connecting", API);
     let opened = false;
     let received = 0;
@@ -97,7 +104,7 @@ export class FeedClient {
       if (gen !== this.generation) return;
       opened = true;
       this.retry = 0;
-      this.setState("connected", API);
+      this.setState("connected", API ?? "");
       if (this.mode === "live") this.ping(gen);
     };
     ws.onmessage = (m) => {
@@ -145,7 +152,8 @@ export class FeedClient {
   private playLocal(gen: number) {
     const { events, bundled } = localReplay();
     this.local = { bundled };
-    this.setState("local", bundled ? "Playing the replay built from archived public data (backend replay not available)." : "Server unavailable; playing the bundled replay.");
+    const where = API ? (bundled ? "Playing the replay built from archived public data (backend replay not available)." : "Server unavailable; playing the bundled replay.") : "Playing the replay in your browser from archived public data.";
+    this.setState("local", where);
     this.localEvents = [...events].sort((a, b) => (a.offsetSeconds ?? 0) - (b.offsetSeconds ?? 0));
     this.scheduleLocal(gen, 0, -1);
   }

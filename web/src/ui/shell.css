@@ -745,6 +745,12 @@ body.painting #app canvas {
   white-space: nowrap;
 }
 
+/* 公开网站没有后端时，"Live feed" 不可用 */
+.feed-modes button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .metrics dd.ember {
   color: var(--ember);
 }

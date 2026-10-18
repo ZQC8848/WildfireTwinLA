@@ -277,8 +277,8 @@ export class Shell {
       </div>
       <div class="tool-group" role="group" aria-label="Show on map">
         <button class="tool-btn toggle" id="show-wind" aria-pressed="false">${TOOL_ICONS.wind}<span>Wind arrows</span></button>
-        <button class="tool-btn toggle" id="show-smoke" aria-pressed="true">${TOOL_ICONS.smoke}<span>Smoke</span></button>
-        <button class="tool-btn toggle" id="show-alerts" aria-pressed="true" title="Shortcut: H">${TOOL_ICONS.alerts}<span>Home alerts</span><span class="tool-badge" id="alerts-count" hidden></span><kbd>H</kbd></button>
+        <button class="tool-btn toggle" id="show-smoke" aria-pressed="false">${TOOL_ICONS.smoke}<span>Smoke</span></button>
+        <button class="tool-btn toggle" id="show-alerts" aria-pressed="false" title="Shortcut: H">${TOOL_ICONS.alerts}<span>Home alerts</span><span class="tool-badge" id="alerts-count" hidden></span><kbd>H</kbd></button>
         <button class="tool-btn toggle" id="show-markers" aria-pressed="true">${TOOL_ICONS.markers}<span>Satellite hotspots</span></button>
         <button class="tool-btn toggle" id="show-contact" aria-pressed="true">${TOOL_ICONS.phone}<span>Contact status</span></button>
       </div>`;
@@ -670,6 +670,13 @@ export class Shell {
   }
 
   // ---- 数据源 ----
+  /** 没有后端时禁用"Live feed"，并说明原因 */
+  setLiveAvailable(ok: boolean) {
+    const b = this.q<HTMLButtonElement>('#feed-mode [data-feed="live"]');
+    b.disabled = !ok;
+    b.title = ok ? "" : "The live feed needs a backend. This public demo replays the Norte Fire from archived public data.";
+  }
+
   setFeed(mode: "off" | "live" | "replay", status: string, rows: [string, string][], bundled = false) {
     document.querySelectorAll<HTMLButtonElement>("#feed-mode button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.feed === mode)));
     const notes: Record<typeof mode, string> = {
