@@ -3,6 +3,7 @@
 // - 订阅 /ws/dispatch：快照 + 每条任务的状态变化 + 汇总计数
 // - 维护每栋房屋的联络状态，供侧栏列表、地图状态点与房屋冒泡使用
 // 后端只发打码后的住户信息（姓名、电话、门牌号），前端不接触完整数据。
+// 没有配置后端（公开网站）时，同一套调度在 Web Worker 里运行（localDispatch.worker.ts），消息格式相同。
 
 import { API } from "./feed";
 
@@ -78,13 +79,21 @@ export class DispatchClient {
   version = 0;
   private ws: WebSocket | null = null;
   private retry = 0;
+  private worker: Worker | null = null;
+  /** 调度在哪里运行：后端，或浏览器内的 Web Worker */
+  readonly where: "backend" | "browser" = API ? "backend" : "browser";
 
-  constructor(private onChange: () => void) {}
+  /** gridWidth：网格宽度（格），浏览器内调度用它把燃烧格编号换成坐标 */
+  constructor(
+    private onChange: () => void,
+    private gridWidth = 512,
+  ) {}
 
   async start(): Promise<void> {
     if (this.state === "starting" || this.state === "active") return;
     this.state = "starting";
     this.onChange();
+    if (!API) return this.startLocal();
     try {
       const res = await fetch(`${API}/api/v1/dispatch/start`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -108,12 +117,14 @@ export class DispatchClient {
     this.summary = null;
     this.version++;
     this.onChange();
-    if (wasActive) await fetch(`${API}/api/v1/dispatch/stop`, { method: "POST" }).catch(() => undefined);
+    if (!API) this.worker?.postMessage({ cmd: "stop" });
+    else if (wasActive) await fetch(`${API}/api/v1/dispatch/stop`, { method: "POST" }).catch(() => undefined);
   }
 
   /** 上报燃烧格（网格索引）与模型到达时间（buildingId → 分钟） */
   async pushFire(cells: number[], etas: Record<string, number>, windFromDeg: number, windSpeedMs: number): Promise<void> {
     if (this.state !== "active" || !cells.length) return;
+    if (!API) return this.worker?.postMessage({ cmd: "fire", cells, width: this.gridWidth, etas, windFromDeg, windSpeedMs });
     await fetch(`${API}/api/v1/dispatch/fire`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -121,7 +132,30 @@ export class DispatchClient {
     }).catch(() => undefined);
   }
 
+  /** 浏览器内调度：Worker 自己加载住户目录（约 5 万户，在后台线程生成），之后与后端的消息完全相同 */
+  private startLocal() {
+    if (!this.worker) {
+      this.worker = new Worker(new URL("./localDispatch.worker.ts", import.meta.url), { type: "module" });
+      this.worker.onmessage = (e: MessageEvent) => {
+        const msg = e.data;
+        if (msg.type === "started") {
+          if (this.state !== "starting") return;
+          this.summary = msg.summary as DispatchSummary;
+          this.state = "active";
+          this.onChange();
+        } else if (msg.type === "error") {
+          this.state = "offline";
+          this.onChange();
+        } else if (this.state === "active" || msg.type === "dispatch_snapshot") {
+          this.handle(msg);
+        }
+      };
+    }
+    this.worker.postMessage({ cmd: "start", base: import.meta.env.BASE_URL });
+  }
+
   private connect() {
+    if (!API) return;
     const ws = new WebSocket(`${API.replace(/^http/, "ws")}/ws/dispatch`);
     this.ws = ws;
     ws.onmessage = (m) => {

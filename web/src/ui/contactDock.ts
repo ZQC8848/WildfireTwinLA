@@ -206,7 +206,7 @@ export class ContactDock {
       off: "Calls the homes closest to the fire first and texts everyone nearby. Starts on its own when a fire is detected.",
       starting: "Loading the household directory…",
       active: "Nearest homes first; texts within 1.5 km.",
-      offline: "Needs the backend (localhost:8010). Start it, then press Start.",
+      offline: "Could not start the dispatcher. Reload the page, or start the backend (localhost:8010) when developing.",
     }[state];
 
     // 收起时的标签：通话中与需要帮助的数量

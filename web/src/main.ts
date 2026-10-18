@@ -37,6 +37,7 @@ import { HouseFlames } from "./scene/houseFlames";
 import { FlyControls } from "./scene/flyControls";
 import { sampleElevation, worldToGrid } from "./scene/coords";
 import { ContactCode, DispatchClient, type ContactTask } from "./net/dispatch";
+import { API } from "./net/feed";
 import { ContactMarkers } from "./scene/contactMarkers";
 import { ContactOutline, OutlineKind } from "./scene/contactOutline";
 import { ContactDock, type ContactTaskView } from "./ui/contactDock";
@@ -149,6 +150,8 @@ let currentWind: WindField = buildWindField(simParams.windMode, inflow(), windMo
 const sim = new FireSim(ctx.renderer, grid, terrain.gridTexture, currentWind);
 const smoke = new Smoke(grid, windGrid(currentWind, meta.width, meta.height), terrain.minElev, terrain.verticalScale);
 ctx.scene.add(smoke.object);
+// 为了性能，烟雾和房屋冒泡默认关闭，用户可在右侧工具条打开
+smoke.object.visible = false;
 const windLayer = new WindLayer(grid, terrain.minElev, terrain.verticalScale);
 ctx.scene.add(windLayer.object);
 const monitor = new FireMonitor(grid, bundle.communities, bundle.buildings);
@@ -238,7 +241,7 @@ function flyToView(view: "overview" | "fire" | "community") {
 
 // ---- 时间轴：显示时刻（null 表示当前时刻） ----
 let viewMinutes: number | null = null;
-let smokeEnabled = true;
+let smokeEnabled = false;
 function goLive() {
   viewMinutes = null;
   smoke.object.visible = smokeEnabled;
@@ -303,6 +306,8 @@ const shell = new Shell(
     onShowPlan: (key) => planner.show(key),
     onFeed: (mode) => startFeed(mode),
     onShowSmoke: (show) => {
+      // 关闭期间不更新烟雾；打开时先补算一段，烟柱立即成形
+      if (show && !smokeEnabled) smoke.warmup(smoke.material.uniforms.uLife.value, propMaterial.uniforms.uTime.value);
       smokeEnabled = show;
       smoke.object.visible = show && viewMinutes === null;
     },
@@ -589,6 +594,7 @@ const homeAlerts = new HomeAlerts(
   },
   (shown, total) => shell.setAlertCount(shown, total),
 );
+homeAlerts.setVisible(false);
 
 // ---- 相机：轨道模式（默认）与飞行模式（WASD，类似 Unity 编辑器） ----
 const fly = new FlyControls(
@@ -654,7 +660,9 @@ const CONTACT_REPLAY_SPEED = 1;
 const buildingIndex = new Map(bundle.buildings.map((b, i) => [b.id, i]));
 let contactDirty = true;
 let contactStoppedByUser = false;
-const dispatch = new DispatchClient(() => (contactDirty = true));
+const dispatch = new DispatchClient(() => (contactDirty = true), meta.width);
+// 没有后端（公开网站）：实时数据不可用；回放和紧急联络都在浏览器内运行
+if (!API) shell.setLiveAvailable(false);
 const dock = new ContactDock({
   onToggle: () => {
     if (dispatch.state === "active" || dispatch.state === "starting") {
@@ -910,7 +918,7 @@ ctx.onFrame((dt) => {
   propMaterial.uniforms.uStepMinutes.value = SpreadParams.stepMinutes;
   terrain.uniforms.uStepMinutes.value = SpreadParams.stepMinutes;
   props.update(ctx.camera);
-  smoke.update(dt, propMaterial.uniforms.uTime.value);
+  if (smokeEnabled) smoke.update(dt, propMaterial.uniforms.uTime.value);
 
   // 运行中每 0.12 秒异步读回一次（约 2–3 步），烟源紧跟火线；暂停时放慢到 0.5 秒
   readTimer += dt;

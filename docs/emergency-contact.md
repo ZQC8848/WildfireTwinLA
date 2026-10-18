@@ -47,6 +47,17 @@
 - 未接听约 30%，失败约 5%；
 - 短信送达约 97%。
 
+## 运行在哪里
+
+- **开发时（`npm run dev`）**：前端连本地后端 `localhost:8010`，调度在 `server/app/dispatch.py` 里运行。
+- **公开网站（正式构建、未设置 `VITE_API_URL`）**：同一套调度在浏览器的 Web Worker 里运行（`web/src/net/localDispatch.worker.ts`）。
+  - 住户目录（约 5 万户）在后台线程生成。
+  - 常量、概率、线路话后整理、重拨与短信补发都与后端一致。
+  - 消息格式与 `/ws/dispatch` 相同，面板不区分来源。
+  - 真实外呼（Retell）只在后端可用。
+
+见 [deploy.md](deploy.md)。
+
 ## 接口
 
 | 接口 | 说明 |
