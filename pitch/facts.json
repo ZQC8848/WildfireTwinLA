@@ -1,0 +1,46 @@
+{
+  "replay_caption": "Norte Fire, Orange County — after-the-fact replay of Oct 16, 2026 at T + 2 h 15 m (≈1:48 p.m. PDT), from NIFC incident records, NASA FIRMS VIIRS and NOAA HRRR wind. Not live.",
+  "calfire": [
+    {
+      "name": "Norte",
+      "where": "San Clemente, Orange County · lead: OCFA",
+      "stats": "570 acres · 25% contained"
+    },
+    {
+      "name": "Bryson",
+      "where": "Malibu area, Los Angeles County",
+      "stats": "146 acres · 61% contained"
+    },
+    {
+      "name": "Peak",
+      "where": "Azusa area, Los Angeles County",
+      "stats": "43 acres · 41% contained"
+    }
+  ],
+  "calfire_note": "CAL FIRE pages (local agencies lead), updated Oct 17; retrieved 7:10–7:19 PM PDT. Bryson and Peak are not shown in our app.",
+  "news": {
+    "file": "W4-news-norte-1.png",
+    "credit": "CBS Los Angeles, Oct 16, 2026 (updated 9:32 PM PDT)"
+  },
+  "compare_takeaway": "Our $25k fuel break: 422 buildings reached vs 419 untreated — inside the ±58 run-to-run noise, so the app shows “≈ 0”, not “homes saved”.",
+  "compare_caption": "Test fire at the Norte ignition · ENE 8.5 m/s · 8 h · 5 runs · “homes” = mapped buildings",
+  "twist1": {
+    "title": "Twist 1 — Federal funding pathway",
+    "lines": [
+      "Primary: USDA Forest Service Community Wildfire Defense Grant (CWDG). It funds Community Wildfire Protection Plans (up to $250k) and their projects; we would join an eligible community or Fire Safe Council application as the planning-and-outreach tool.",
+      "Alternative: NSF SBIR/STTR (America’s Seed Fund), reauthorized through Sept 30, 2031; project pitches accepted anytime."
+    ],
+    "source": "fs.usda.gov CWDG (next round not yet posted); sba.gov, Apr 13, 2026; seedfund.nsf.gov. Retrieved Oct 17, 2026."
+  },
+  "twist2": {
+    "title": "Twist 2 — Going global (e.g., China)",
+    "lines": [
+      "Carries over: NASA FIRMS fire detections, Sentinel-2 imagery, Copernicus GLO-30 elevation; ECMWF or GFS weather replaces US-only HRRR.",
+      "Needs local work: fuel maps (LANDFIRE is US-only), building footprints (OSM is sparse in many regions), agency zones, contact consent, local telephony rules.",
+      "Retell voice agents support Mandarin (zh-CN)."
+    ],
+    "source": "NASA FIRMS; Copernicus; LANDFIRE; NOAA NCO; Herfort et al., Nature Comms 2023; docs.retellai.com. Retrieved Oct 17, 2026."
+  },
+  "team": "Team: Qinchuan · Tia · Lucia — The Dual-Use Hackathon, Resilience Comms lens",
+  "repo": "https://github.com/ZQC8848/WildfireTwinLA"
+}
