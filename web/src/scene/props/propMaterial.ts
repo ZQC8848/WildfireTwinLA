@@ -207,3 +207,6 @@ export function createPropMaterial(gridSize: THREE.Vector2, minElev: number, vSc
   material.uniforms.uSunDir.value = sunDir;
   return material;
 }
+
+/** 房屋描边遮罩（scene/contactOutline.ts）复用同一个顶点变换，轮廓与渲染出的模型完全一致 */
+export { vertexShader as propVertexShader };

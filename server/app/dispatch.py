@@ -4,7 +4,8 @@ Two priority queues run in parallel, each with its own limit:
 
 * Calls: `call_lines` concurrent lines; the queue head is the home with the earliest expected
   fire arrival (vulnerable residents five minutes earlier). No answer is retried once after
-  three minutes, then falls back to text.
+  three minutes, then falls back to text. Each call holds its line for a short wrap-up after it
+  ends, so the outcome stays on the line board before the next call takes the line.
 * Texts: `sms_per_second`; every home in the text zone, including the call zone as a backup.
 
 Priority combines two sources. The baseline is the distance from each home to the nearest fire
@@ -38,6 +39,7 @@ TEXT_ETA_MIN = 90
 TEXT_DISTANCE_M = 1500
 VULNERABLE_BONUS_MIN = 5
 RETRY_AFTER_S = 180
+WRAP_UP_S = 15  # after-call work, in call seconds (1.5 s on screen at demo speed 10)
 
 CALL_ACTIVE = {"ringing", "talking"}
 CALL_FINAL = {"confirmed", "needs_help", "no_answer", "failed"}
@@ -54,6 +56,7 @@ class ContactTask:
     distance_m: float = 0.0
     attempt: int = 1
     provider: str = "mock"
+    line: int | None = None  # 1-based call line; kept after the call so the board shows the outcome
     ready_at: float = 0.0
     updated_at: float = field(default_factory=time.time)
 
@@ -67,6 +70,7 @@ class ContactTask:
             "channel": self.channel,
             "status": self.status,
             "attempt": self.attempt,
+            "line": self.line,
             "etaMin": round(self.eta_min, 1),
             "distanceM": round(self.distance_m),
             "provider": self.provider,
@@ -106,6 +110,7 @@ class Dispatcher:
         self._by_household: dict[tuple[str, str], ContactTask] = {}
         self._workers: list[asyncio.Task] = []
         self._running: set[asyncio.Task] = set()
+        self._lines: list[str | None] = [None] * call_lines  # task id holding each line
         self._xy: np.ndarray | None = None
         self._vulnerable: np.ndarray | None = None
 
@@ -121,6 +126,8 @@ class Dispatcher:
             self.demo_speed = max(0.1, demo_speed)
         if call_lines:
             self.call_lines = max(1, call_lines)
+            held = self._lines[: self.call_lines]
+            self._lines = held + [None] * (self.call_lines - len(held))
         await self.preload()
         if not self.active:
             self.active = True
@@ -139,6 +146,7 @@ class Dispatcher:
         self._running.clear()
         self.tasks.clear()
         self._by_household.clear()
+        self._lines = [None] * self.call_lines
         await self._broadcast("dispatch_snapshot", self.snapshot())
 
     # ---- fire updates ----
@@ -219,19 +227,30 @@ class Dispatcher:
 
     async def _call_loop(self) -> None:
         while self.active:
-            busy = sum(
-                1 for t in self.tasks.values() if t.channel == "call" and t.status in CALL_ACTIVE
-            )
-            for _ in range(max(0, self.call_lines - busy)):
+            for i, holder in enumerate(self._lines):
+                if holder is not None:
+                    continue
                 task = self._next("call")
                 if not task:
                     break
+                task.line = i + 1
+                self._lines[i] = task.id
                 task.status = "ringing"
                 await self._emit(task)
-                runner = asyncio.create_task(self._run_call(task))
-                self._running.add(runner)
-                runner.add_done_callback(self._running.discard)
+                self._spawn(self._run_call(task))
             await asyncio.sleep(0.1)
+
+    def _spawn(self, coro: Awaitable[None]) -> None:
+        runner = asyncio.ensure_future(coro)
+        self._running.add(runner)
+        runner.add_done_callback(self._running.discard)
+
+    async def _wrap_up(self, task: ContactTask) -> None:
+        """Hold the line on the call's outcome for a moment, then free it for the next call."""
+        line = (task.line or 0) - 1  # read first: a retried call may move to another line
+        await self._sleep(WRAP_UP_S)
+        if 0 <= line < len(self._lines) and self._lines[line] == task.id:
+            self._lines[line] = None
 
     async def _sleep(self, real_seconds: float) -> None:
         await asyncio.sleep(real_seconds / self.demo_speed)
@@ -240,7 +259,8 @@ class Dispatcher:
         if self.real_caller:
             call_id = await self.real_caller(task)
             if call_id:
-                # The Retell webhook reports the outcome through on_provider_status()
+                # The Retell webhook reports the outcome through on_provider_status(), which
+                # also frees the line
                 task.provider = "retell"
                 await self._emit(task)
                 return
@@ -252,12 +272,13 @@ class Dispatcher:
             await self._sleep(self.rng.uniform(30, 75))
             help_chance = 0.25 if task.household.vulnerable else 0.06
             task.status = "needs_help" if self.rng.random() < help_chance else "confirmed"
+            await self._emit(task)
         elif roll < 0.95:
             await self._no_answer(task)
-            return
         else:
             task.status = "failed"
-        await self._emit(task)
+            await self._emit(task)
+        await self._wrap_up(task)
 
     async def _no_answer(self, task: ContactTask) -> None:
         if task.attempt == 1:
@@ -286,9 +307,7 @@ class Dispatcher:
                 budget -= 1
                 task.status = "sending"
                 await self._emit(task)
-                runner = asyncio.create_task(self._run_text(task))
-                self._running.add(runner)
-                runner.add_done_callback(self._running.discard)
+                self._spawn(self._run_text(task))
             await asyncio.sleep(0.05)
 
     async def _run_text(self, task: ContactTask) -> None:
@@ -325,9 +344,11 @@ class Dispatcher:
             return False
         if mapped == "no_answer":
             await self._no_answer(task)
-            return True
-        task.status = mapped
-        await self._emit(task)
+        else:
+            task.status = mapped
+            await self._emit(task)
+        if task.status not in CALL_ACTIVE:
+            self._spawn(self._wrap_up(task))
         return True
 
     # ---- state ----

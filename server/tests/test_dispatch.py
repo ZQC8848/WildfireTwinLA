@@ -108,3 +108,31 @@ def test_unanswered_calls_retry_once_then_fall_back_to_text() -> None:
         await d.stop()
 
     asyncio.run(scenario())
+
+
+def test_calls_take_numbered_lines_and_hold_them_through_wrap_up() -> None:
+    homes = [_household(i, 11.5 + i) for i in range(1, 4)]
+
+    async def broadcast(kind: str, data: dict) -> None:
+        return None
+
+    async def scenario() -> None:
+        # Real speed: every call is still ringing (8 s or more) when the lines are checked
+        d = Dispatcher(lambda: homes, broadcast, call_lines=2, demo_speed=1)
+        await d.start()
+        await d.update_fire([10 * 64 + 10], 64)
+        await asyncio.sleep(0.15)
+        first = sorted((t.line, t.household.id) for t in d.tasks.values() if t.line)
+        # Two lines, nearest two homes first; the third waits for a free line
+        assert first == [(1, "hh-1"), (2, "hh-2")]
+        assert d.tasks["call-hh-3"].status == "queued"
+        # A finished call keeps its line during wrap-up, then the line takes the next call
+        call = d.tasks["call-hh-1"]
+        call.status = "confirmed"
+        d.demo_speed = 1000
+        await d._wrap_up(call)
+        assert d._lines[0] is None
+        assert call.line == 1  # kept so the board can show the outcome
+        await d.stop()
+
+    asyncio.run(scenario())

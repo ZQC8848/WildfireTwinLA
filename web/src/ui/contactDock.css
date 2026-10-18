@@ -1,0 +1,742 @@
+/* 紧急联络面板（Respond 模式，地图右侧）。外呼与短信都是人的干预，用 Retardant 粉红；
+   各状态的颜色与地图上的联络状态点一致。 */
+
+:root {
+  --dock-open-w: 340px;
+  --dock-tab-w: 44px;
+}
+
+/* 地图和右侧浮层都让出 --dock-w；Plan 模式下面板不存在 */
+body {
+  --dock-w: 0px;
+}
+
+body[data-mode="respond"] {
+  --dock-w: var(--dock-tab-w);
+}
+
+body[data-mode="respond"].dock-open {
+  --dock-w: var(--dock-open-w);
+}
+
+.dock {
+  position: fixed;
+  top: var(--topbar-h);
+  bottom: var(--bottombar-h);
+  right: 0;
+  z-index: 10;
+  display: none;
+  width: var(--dock-w);
+  background: var(--surface);
+  color: var(--ink);
+  border-left: 1px solid var(--rule);
+  transition:
+    background-color var(--mode-ease),
+    color var(--mode-ease),
+    border-color var(--mode-ease);
+}
+
+body[data-mode="respond"] .dock {
+  display: flex;
+}
+
+/* ---- 收起：竖向标签 ---- */
+.dock-tab {
+  display: none;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+body:not(.dock-open) .dock-tab {
+  display: flex;
+}
+
+body:not(.dock-open) .dock-body {
+  display: none;
+}
+
+.dock-tab:hover {
+  background: var(--surface-raised);
+}
+
+.dock-tab .tool-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--retardant);
+}
+
+.dock-tab-label {
+  writing-mode: vertical-rl;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.dock-badge {
+  min-width: 22px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--retardant);
+  color: #fff;
+  font: 600 var(--t-13) / 1.5 var(--font-figure);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.dock-badge.help {
+  background: #fff;
+  color: var(--retardant);
+  box-shadow: inset 0 0 0 1.5px var(--retardant);
+}
+
+.dock-badge[hidden] {
+  display: none;
+}
+
+/* ---- 展开 ---- */
+.dock-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 16px 12px;
+  overflow-y: auto;
+}
+
+.dock-body [hidden] {
+  display: none !important;
+}
+
+.dock-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dock-head h2 {
+  flex: 1;
+  margin: 0;
+  font-size: var(--t-18);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dock-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.dock-close:hover {
+  background: var(--surface-raised);
+}
+
+.dock-note {
+  margin: -8px 0 0;
+  color: var(--ink-muted);
+  font-size: var(--t-13);
+  line-height: 1.4;
+}
+
+.synthetic-note {
+  margin: 0;
+}
+
+.dock-state {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--rule);
+  color: var(--ink-muted);
+  font-weight: 600;
+}
+
+.dock-state[data-state="active"] {
+  background: var(--retardant);
+  box-shadow: none;
+  color: #fff;
+}
+
+.dock-state[data-state="active"]::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: #fff;
+  vertical-align: 1px;
+  animation: ring-blink 1.2s steps(2, start) infinite;
+}
+
+.dock-sub {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: var(--t-15);
+  font-weight: 600;
+}
+
+.dock-sub.help {
+  color: var(--retardant);
+}
+
+.dock-sub-note {
+  font: 400 var(--t-13) var(--font-figure);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+}
+
+/* ---- 进度条 ---- */
+.prog + .prog {
+  margin-top: 12px;
+}
+
+.prog-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-weight: 600;
+}
+
+.prog-head .figure {
+  font-size: var(--t-13);
+  font-weight: 500;
+  color: var(--ink-muted);
+}
+
+.prog-bar {
+  display: flex;
+  gap: 1px;
+  height: 8px;
+  margin: 5px 0 6px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--rule);
+}
+
+.seg {
+  flex: 0 1 0;
+  min-width: 3px;
+}
+
+.seg.rest {
+  min-width: 0;
+  background: transparent;
+}
+
+.prog-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-size: var(--t-13);
+  color: var(--ink-muted);
+}
+
+.prog-legend b {
+  margin-left: 4px;
+  color: var(--ink);
+  font: 600 var(--t-13) var(--font-figure);
+  font-variant-numeric: tabular-nums;
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 50%;
+}
+
+/* 状态颜色：与地图联络状态点一致 */
+.c-safe {
+  background: var(--retardant);
+}
+
+.c-help {
+  background: #fff;
+  box-shadow: inset 0 0 0 1.5px var(--retardant);
+}
+
+.c-missed {
+  background: color-mix(in srgb, var(--retardant) 38%, var(--surface));
+}
+
+.c-live {
+  background: var(--retardant);
+  animation: ring-blink 1s steps(2, start) infinite;
+}
+
+.c-sent {
+  background: color-mix(in srgb, var(--retardant) 45%, #fff);
+}
+
+.c-sending {
+  background: color-mix(in srgb, var(--retardant) 25%, #fff);
+}
+
+.c-failed {
+  background: color-mix(in srgb, var(--ink-muted) 60%, transparent);
+}
+
+.c-wait {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--ink-muted);
+}
+
+@keyframes ring-blink {
+  to {
+    opacity: 0.45;
+  }
+}
+
+/* ---- 外呼线路：位置固定，一条线路一张卡 ---- */
+.lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 三行固定高度：姓名与状态；地址与标签；电话与火势到达。空闲线路同样高度，线路面板不会跳动 */
+.line {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  height: 66px;
+  padding: 6px 10px 6px 8px;
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  font-size: var(--t-13);
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.line.idle {
+  align-items: center;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--rule);
+  cursor: default;
+}
+
+.line.ringing,
+.line.talking {
+  box-shadow: inset 3px 0 0 var(--retardant);
+}
+
+.line.help {
+  background: color-mix(in srgb, var(--retardant) 12%, var(--surface-raised));
+  box-shadow: inset 0 0 0 1px var(--retardant);
+}
+
+.ln-num {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--rule);
+  color: var(--ink-muted);
+  font: 600 var(--t-13) var(--font-figure);
+}
+
+.line.ringing .ln-num {
+  color: var(--retardant);
+  box-shadow: inset 0 0 0 1.5px var(--retardant);
+  animation: ring-blink 1s steps(2, start) infinite;
+}
+
+.line.talking .ln-num,
+.line.confirmed .ln-num {
+  background: var(--retardant);
+  box-shadow: none;
+  color: #fff;
+}
+
+.line.help .ln-num {
+  background: #fff;
+  box-shadow: inset 0 0 0 2px var(--retardant);
+  color: var(--retardant);
+}
+
+.line.missed .ln-num {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--retardant) 45%, transparent);
+}
+
+.ln-free {
+  color: var(--ink-muted);
+}
+
+.ln-body {
+  min-width: 0;
+}
+
+.ln-top,
+.ln-mid,
+.ln-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ln-mid {
+  margin: 1px 0;
+}
+
+.ln-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--t-15);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ln-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--retardant);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.line.missed .ln-state {
+  color: var(--ink-muted);
+}
+
+/* 结果出现时轻微弹入 */
+.line.done .ln-state {
+  animation: result-in 0.35s ease-out;
+}
+
+@keyframes result-in {
+  from {
+    opacity: 0.4;
+    transform: translateY(3px);
+  }
+}
+
+.line.done:not(.help) .ln-mid,
+.line.done:not(.help) .ln-meta,
+.line.done:not(.help) .ln-name {
+  opacity: 0.7;
+}
+
+.ln-icon {
+  width: 13px;
+  height: 13px;
+  stroke-width: 2;
+}
+
+.ln-clock {
+  font-family: var(--font-figure);
+  font-variant-numeric: tabular-nums;
+}
+
+.ln-addr {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ln-mid .ci-tag {
+  flex: none;
+  margin-left: 0;
+}
+
+.ln-meta {
+  color: var(--ink-muted);
+  font-family: var(--font-figure);
+  font-variant-numeric: tabular-nums;
+}
+
+.ln-eta {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* ---- 需要帮助 ---- */
+.contact-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.contact-item {
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--retardant);
+  font-size: var(--t-13);
+  cursor: pointer;
+}
+
+.ci-top,
+.ci-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ci-name {
+  font-weight: 600;
+  font-size: var(--t-15);
+}
+
+.ci-phone,
+.ci-meta {
+  font-family: var(--font-figure);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+}
+
+.ci-addr {
+  margin: 2px 0;
+}
+
+.ci-state {
+  color: var(--retardant);
+  font-weight: 600;
+}
+
+.ci-tag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 8px;
+  border: 1px solid var(--retardant);
+  color: var(--retardant);
+  font: 500 var(--t-13) / 1.3 var(--font-ui);
+  white-space: nowrap;
+}
+
+.ci-tag.quiet {
+  border-color: var(--rule);
+  color: var(--ink-muted);
+}
+
+/* ---- 队列：占满剩余高度并在内部滚动；面板太矮时至少保留约 6 行，整个面板滚动 ---- */
+.dock-queue {
+  flex: 1 0 280px;
+  display: flex;
+  flex-direction: column;
+  min-height: 280px;
+}
+
+.queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.queue-head .dock-sub {
+  margin: 0;
+}
+
+.queue-tabs button {
+  height: 28px;
+  font-size: var(--t-13);
+}
+
+.queue-tabs button[aria-pressed="true"] {
+  color: var(--retardant);
+}
+
+.contact-queue {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--t-13);
+}
+
+.contact-queue li {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-top: 1px solid var(--rule);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.q-rank {
+  font-family: var(--font-figure);
+  color: var(--ink-muted);
+  text-align: right;
+}
+
+.q-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.q-addr {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.q-owner {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  overflow: hidden;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.q-owner .ci-tag {
+  margin-left: 0;
+}
+
+.q-eta {
+  font-family: var(--font-figure);
+  font-variant-numeric: tabular-nums;
+}
+
+.contact-queue li.q-more {
+  display: block;
+  color: var(--ink-muted);
+  cursor: default;
+}
+
+/* ---- 悬停、键盘焦点与从地图选中 ---- */
+.line[data-building]:hover,
+.contact-item:hover,
+.contact-queue li[data-building]:hover {
+  background: color-mix(in srgb, var(--retardant) 10%, var(--surface-raised));
+}
+
+.dock [data-building]:focus-visible {
+  outline: 2px solid var(--retardant);
+  outline-offset: 1px;
+}
+
+.dock .pinged {
+  outline: 2px solid var(--retardant);
+  outline-offset: 2px;
+}
+
+/* ---- 左侧信息栏的入口 ---- */
+.contact-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.contact-entry:hover {
+  border-color: var(--retardant);
+}
+
+.contact-entry .tool-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--retardant);
+}
+
+.ce-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ce-title {
+  font-weight: 600;
+}
+
+.ce-sub {
+  color: var(--ink-muted);
+  font-size: var(--t-13);
+}
+
+.ce-go {
+  color: var(--ink-muted);
+  font-size: var(--t-18);
+}
+
+/* ---- 窄屏：左栏是底部抽屉，面板展开时盖住抽屉；收起时是抽屉上方的按钮 ---- */
+@media (max-width: 900px) {
+  body[data-mode="respond"],
+  body[data-mode="respond"].dock-open {
+    --dock-w: 0px;
+  }
+
+  .dock {
+    top: auto;
+    width: 100%;
+    height: var(--drawer-h);
+    border-left: 0;
+    border-top: 1px solid var(--rule);
+    z-index: 11;
+  }
+
+  body:not(.dock-open) .dock {
+    right: 12px;
+    bottom: calc(var(--bottombar-h) + var(--drawer-h) + 8px);
+    width: auto;
+    height: auto;
+    border: 0;
+    border-radius: var(--radius-float);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  }
+
+  .dock-tab {
+    flex-direction: row;
+    padding: 6px 12px;
+  }
+
+  .dock-tab-label {
+    writing-mode: horizontal-tb;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .c-live,
+  .line.ringing .ln-num,
+  .dock-state[data-state="active"]::before {
+    animation: none;
+  }
+}

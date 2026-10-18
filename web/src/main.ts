@@ -37,7 +37,9 @@ import { HouseFlames } from "./scene/houseFlames";
 import { FlyControls } from "./scene/flyControls";
 import { sampleElevation, worldToGrid } from "./scene/coords";
 import { ContactCode, DispatchClient, type ContactTask } from "./net/dispatch";
-import type { ContactTaskView } from "./ui/shell";
+import { ContactMarkers } from "./scene/contactMarkers";
+import { ContactOutline, OutlineKind } from "./scene/contactOutline";
+import { ContactDock, type ContactTaskView } from "./ui/contactDock";
 import { ENSEMBLE_FACTOR, ENSEMBLE_MEMBERS, Ensemble, communityOutlook, type CommunityOutlook, type EnsembleResult } from "./sim/ensemble";
 
 const q = new URLSearchParams(location.search);
@@ -321,15 +323,11 @@ const shell = new Shell(
     onForecast: () => runForecast(),
     onShowAlerts: (show) => homeAlerts.setVisible(show),
     onShowMarkers: (show) => (markers.object.visible = show),
-    onShowContact: (show) => terrain.showContact(show),
-    onContactToggle: () => {
-      if (dispatch.state === "active" || dispatch.state === "starting") {
-        contactStoppedByUser = true;
-        void dispatch.stop();
-      } else void startContact();
+    onShowContact: (show) => {
+      contactMarkers.object.visible = show;
+      contactOutline.setShown(show);
     },
-    onContactFocus: (buildingId) => focusHome(buildingId),
-    onContactRefresh: () => renderContact(),
+    onContactOpen: () => dock.setOpen(true),
     onCameraMode: (mode) => fly.setEnabled(mode === "fly"),
     onNorth: () => {
       // 转到正北：轨道模式绕旋转中心转到目标的正南方；飞行模式原地转向北方
@@ -370,8 +368,6 @@ ctx.onFrame(() => {
   const d = ctx.camera.getWorldDirection(new THREE.Vector3());
   if (Math.hypot(d.x, d.z) > 1e-3) shell.setHeading((Math.atan2(d.x, -d.z) * 180) / Math.PI);
 });
-// 画布尺寸由 shell 的布局决定（侧栏、顶栏、底栏之外的区域）
-window.dispatchEvent(new Event("resize"));
 
 // 本区域概况
 {
@@ -520,6 +516,20 @@ bundle.buildings.forEach((b, i) => {
   roofSize[i] = 8;
 });
 const homeStatus = new HomeStatus(grid, bundle.buildings, roofAnchors, bundle.communities);
+// 紧急联络在地图上的表达：每户一个屋顶标记（所有距离、所有状态）；通话中与需要帮助的房屋再加屏幕空间描边（近景）
+const contactMarkers = new ContactMarkers(roofAnchors);
+ctx.scene.add(contactMarkers.object);
+const contactOutline = new ContactOutline(layout, lib, propMaterial.uniforms, terrain.createDepthMesh(), ctx.camera, () => ctx.renderer.getPixelRatio());
+// 放在 Bloom 之前，脉动的轮廓才会发光
+bloom.composer.insertPass(contactOutline, 1);
+{
+  const size = ctx.renderer.getDrawingBufferSize(new THREE.Vector2());
+  contactOutline.setSize(size.x, size.y);
+}
+ctx.onFrame((dt) => {
+  contactMarkers.update(dt, ctx.renderer.domElement.clientHeight, ctx.renderer.getPixelRatio());
+  contactOutline.update(dt);
+});
 /** 世界坐标 (x, z) 处的地面高度（显示坐标，已含竖向夸张） */
 const groundAt = (x: number, z: number) => {
   const [gx, gy] = worldToGrid(meta, x, z);
@@ -561,6 +571,11 @@ const homeAlerts = new HomeAlerts(
       const dir = ctx.camera.position.clone().sub(ctx.controls.target).normalize();
       if (dir.y < 0.35) dir.setY(0.35).normalize();
       rig.flyTo(target.clone().addScaledVector(dir, distance), target);
+    },
+    // 点到通话中或需要帮助的房屋：在联络面板里定位到这户
+    onPick: (members) => {
+      const m = members.find((a) => a.state === "help") ?? members.find((a) => a.state === "calling");
+      if (m) dock.reveal(bundle.buildings[m.id].id);
     },
   },
   describeHome,
@@ -640,6 +655,23 @@ const buildingIndex = new Map(bundle.buildings.map((b, i) => [b.id, i]));
 let contactDirty = true;
 let contactStoppedByUser = false;
 const dispatch = new DispatchClient(() => (contactDirty = true));
+const dock = new ContactDock({
+  onToggle: () => {
+    if (dispatch.state === "active" || dispatch.state === "starting") {
+      contactStoppedByUser = true;
+      void dispatch.stop();
+    } else void startContact();
+  },
+  onFocus: (buildingId) => focusHome(buildingId),
+  onHover: (buildingId) => {
+    // 面板里悬停的那户在地图上描边
+    const i = buildingId === null ? undefined : buildingIndex.get(buildingId);
+    if (i === undefined) return terrain.clearHover();
+    const cell = bundle.buildings[i].cell;
+    terrain.setHover(cell % meta.width, Math.floor(cell / meta.width));
+  },
+  onRefresh: () => renderContact(),
+});
 
 function contactBubbles(): Map<string, "calling" | "help"> {
   const out = new Map<string, "calling" | "help">();
@@ -650,23 +682,25 @@ function contactBubbles(): Map<string, "calling" | "help"> {
   return out;
 }
 
-// 地图状态点：同一格有多栋房屋时显示最紧急的状态
-const CONTACT_RANK: Record<number, number> = { 7: 7, 4: 6, 3: 5, 6: 4, 5: 3, 2: 2, 1: 1 };
-const contactCodes = new Uint8Array(meta.width * meta.height);
+// 屋顶标记与描边：每户自己的状态（一户一个标记，不再按格子合并）
+const contactByBuilding = new Uint8Array(bundle.buildings.length);
 function refreshContactLayer() {
-  contactCodes.fill(0);
+  contactByBuilding.fill(0);
+  const outlined: { building: number; kind: OutlineKind }[] = [];
   for (const [id, code] of dispatch.codes) {
     const i = buildingIndex.get(id);
     if (i === undefined) continue;
-    const cell = bundle.buildings[i].cell;
-    if ((CONTACT_RANK[code] ?? 0) > (CONTACT_RANK[contactCodes[cell]] ?? 0)) contactCodes[cell] = code;
+    contactByBuilding[i] = code;
+    if (code === ContactCode.Calling) outlined.push({ building: i, kind: OutlineKind.Calling });
+    else if (code === ContactCode.NeedsHelp) outlined.push({ building: i, kind: OutlineKind.NeedsHelp });
   }
-  terrain.setContactCodes(dispatch.codes.size ? contactCodes : null);
+  contactMarkers.setCodes(contactByBuilding);
+  contactOutline.setItems(outlined);
 }
 
 function contactView(t: ContactTask): ContactTaskView {
   const h = t.household;
-  const speed = dispatch.summary?.demoSpeed ?? 1;
+  const ageS = Math.max(0, Date.now() / 1000 - t.updatedAt);
   return {
     buildingId: h.buildingId,
     owner: h.owner,
@@ -674,22 +708,35 @@ function contactView(t: ContactTask): ContactTaskView {
     address: h.address,
     vulnerable: h.vulnerable,
     status: t.status,
+    attempt: t.attempt,
     etaMin: t.etaMin,
-    elapsedS: Math.max(0, (Date.now() / 1000 - t.updatedAt) * speed),
+    ageS,
+    elapsedS: ageS * (dispatch.summary?.demoSpeed ?? 1),
   };
 }
+
+/** 队列最多列出的条数（面板内滚动） */
+const QUEUE_ROWS = 50;
 
 function renderContact() {
   const callQueue = dispatch.queue("call");
   const textQueue = dispatch.queue("text");
-  shell.setContact({
+  const s = dispatch.summary;
+  dock.render({
     state: dispatch.state,
-    summary: dispatch.summary,
-    calling: dispatch.calling().map(contactView),
-    help: dispatch.needsHelp().slice(0, 6).map(contactView),
-    queue: { call: callQueue.slice(0, 8).map(contactView), text: textQueue.slice(0, 8).map(contactView) },
+    summary: s,
+    lines: dispatch.lines().map((t) => t && contactView(t)),
+    help: dispatch.needsHelp().slice(0, 12).map(contactView),
+    queue: { call: callQueue.slice(0, QUEUE_ROWS).map(contactView), text: textQueue.slice(0, QUEUE_ROWS).map(contactView) },
     queueTotals: { call: callQueue.length, text: textQueue.length },
   });
+  const entry = {
+    off: "Off. Starts when a fire is detected",
+    starting: "Starting…",
+    offline: "Backend offline",
+    active: s ? `${s.calling} on the line · ${(s.callQueued + s.textQueued).toLocaleString("en-US")} waiting` : "Live",
+  }[dispatch.state];
+  shell.setContactEntry(entry, dispatch.state === "active" ? (s?.needsHelp ?? 0) : 0);
 }
 
 function focusHome(buildingId: string) {
@@ -708,6 +755,7 @@ function startFeed(mode: "off" | "live" | "replay") {
 
 async function startContact() {
   contactStoppedByUser = false;
+  dock.setOpen(true);
   // 起火时立即给回放减速（不等后端响应），让观众看清外呼队列的推进
   if (realtime.mode === "replay") realtime.setReplaySpeed(CONTACT_REPLAY_SPEED);
   await dispatch.start();
@@ -729,7 +777,8 @@ ctx.onFrame((dt) => {
     void dispatch.pushFire(sim.burningSample, etas, simParams.windFrom, simParams.windSpeed);
   }
   contactRenderTimer += dt;
-  if (contactRenderTimer >= 0.25 && (contactDirty || dispatch.calling().length)) {
+  // 运行中持续刷新：通话计时，以及线路上的结果到时回到空闲
+  if (contactRenderTimer >= 0.25 && (contactDirty || dispatch.state === "active")) {
     contactRenderTimer = 0;
     if (contactDirty) refreshContactLayer();
     contactDirty = false;
@@ -1138,4 +1187,4 @@ if (modeParam === "respond" || modeParam === "plan") {
 }
 
 // 调试用
-Object.assign(window, { bundle, ctx, terrain, props, layout, sim, smoke, monitor, shell, runCpuCheck, realtime, planner, ensemble, runForecast, runBench, getForecast: () => ({ forecast, outlook }), homeStatus, homeAlerts, houseFlames, markers, fly, dispatch });
+Object.assign(window, { bundle, ctx, terrain, props, layout, sim, smoke, monitor, shell, runCpuCheck, realtime, planner, ensemble, runForecast, runBench, getForecast: () => ({ forecast, outlook }), homeStatus, homeAlerts, houseFlames, markers, fly, dispatch, contactMarkers, contactOutline });

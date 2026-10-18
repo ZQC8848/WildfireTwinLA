@@ -69,6 +69,8 @@ export interface HomeAlertHandlers {
   onHover(title: string, rows: [string, string][], x: number, y: number): void;
   onLeave(): void;
   onFly(target: THREE.Vector3, distance: number): void;
+  /** 点击气泡时，气泡包含的房屋（用于在联络面板里定位通话中的那户） */
+  onPick?(alerts: HomeAlert[]): void;
 }
 
 export class HomeAlerts {
@@ -281,6 +283,7 @@ export class HomeAlerts {
       const c = el.bubble?.cluster;
       if (!c) return;
       const spread = Math.max(...c.members.map((m) => m.anchor.distanceTo(c.anchor)));
+      this.handlers.onPick?.(c.members);
       this.handlers.onFly(c.anchor.clone(), c.n === 1 ? 260 : Math.max(450, spread * 2.6));
     });
     this.root.appendChild(el);

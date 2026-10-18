@@ -39,9 +39,8 @@ export interface ShellHandlers {
   onShowContact(show: boolean): void;
   onCameraMode(mode: "orbit" | "fly"): void;
   onNorth(): void;
-  onContactToggle(): void;
-  onContactFocus(buildingId: string): void;
-  onContactRefresh(): void;
+  /** 左栏的紧急联络入口：展开右侧面板 */
+  onContactOpen(): void;
   onShowForecast(show: boolean): void;
   onShowSmoke(show: boolean): void;
   onTool(tool: Tool | null): void;
@@ -102,32 +101,6 @@ function writePref(key: string, value: boolean) {
     /* 隐私模式等情况下忽略 */
   }
 }
-
-/** 侧栏显示用的联络任务（只含打码后的字段） */
-export interface ContactTaskView {
-  buildingId: string;
-  owner: string;
-  phone: string;
-  address: string;
-  vulnerable: boolean;
-  status: string;
-  etaMin: number;
-  /** 本次外呼已进行的时间（按演示倍速换算成真实通话的秒数） */
-  elapsedS: number;
-}
-
-export interface ContactView {
-  state: "off" | "starting" | "active" | "offline";
-  summary: { callLines: number; demoSpeed: number; calling: number; callQueued: number; confirmed: number; needsHelp: number; noAnswer: number; callFailed: number; texted: number; textQueued: number; texting: number } | null;
-  calling: ContactTaskView[];
-  help: ContactTaskView[];
-  queue: { call: ContactTaskView[]; text: ContactTaskView[] };
-  queueTotals: { call: number; text: number };
-}
-
-const fmtClock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-const fmtEtaShort = (m: number) => (m < 1 ? "now" : m < 60 ? `~${Math.round(m)} min` : `~${Math.floor(m / 60)} h ${Math.round(m % 60)} min`);
-const fmtEtaText = (m: number) => (m < 1 ? "Fire at the home" : `Fire in ${fmtEtaShort(m)}`);
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
@@ -212,22 +185,13 @@ export class Shell {
           <div class="closest-note" id="closest-note"></div>
         </div>
       </section>
-      <section data-mode-only="respond" id="contact-section">
-        <div class="section-head"><h2>Emergency contact</h2><button class="btn btn-small" id="contact-toggle">Start</button></div>
-        <p class="tool-note" id="contact-status"></p>
-        <dl class="metrics contact-summary" id="contact-summary" hidden></dl>
-        <h3 class="subhead" id="calling-head" hidden>Calling now</h3>
-        <ul class="contact-list" id="contact-calling"></ul>
-        <h3 class="subhead help" id="help-head" hidden>Needs help</h3>
-        <ul class="contact-list" id="contact-help"></ul>
-        <div class="queue-head" id="queue-head" hidden>
-          <h3 class="subhead">Queue</h3>
-          <div class="segmented queue-tabs" id="queue-tabs" role="group" aria-label="Queue">
-            <button data-q="call" aria-pressed="true">Calls <span id="q-call-n"></span></button><button data-q="text" aria-pressed="false">Texts <span id="q-text-n"></span></button>
-          </div>
-        </div>
-        <ol class="contact-queue" id="contact-queue"></ol>
-        <p class="tool-note synthetic-note">Synthetic demo data: names, numbers and house numbers are generated, and numbers use the fictional 555-01xx range.</p>
+      <section data-mode-only="respond">
+        <button class="contact-entry" id="contact-entry" aria-controls="contact-dock">
+          ${TOOL_ICONS.phone}
+          <span class="ce-main"><span class="ce-title">Emergency contact</span><span class="ce-sub" id="contact-entry-sub"></span></span>
+          <span class="dock-badge help" id="contact-entry-help" title="Needs help" hidden></span>
+          <span class="ce-go" aria-hidden="true">›</span>
+        </button>
       </section>
       <section data-mode-only="respond" id="forecast-section">
         <h2>Forecast, next 8 hours</h2>
@@ -427,23 +391,7 @@ export class Shell {
       this.handlers.onCameraMode(mode);
     });
     this.q<HTMLButtonElement>("#forecast-run").addEventListener("click", () => this.handlers.onForecast());
-    this.q<HTMLButtonElement>("#contact-toggle").addEventListener("click", () => this.handlers.onContactToggle());
-    this.q<HTMLDivElement>("#queue-tabs").addEventListener("click", (e) => {
-      const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-q]");
-      if (!b) return;
-      this.queueTab = b.dataset.q as "call" | "text";
-      this.q<HTMLDivElement>("#queue-tabs")
-        .querySelectorAll("button")
-        .forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
-      this.handlers.onContactRefresh();
-    });
-    const focusHome = (e: Event) => {
-      const li = (e.target as HTMLElement).closest<HTMLElement>("[data-building]");
-      if (li?.dataset.building) this.handlers.onContactFocus(li.dataset.building);
-    };
-    const section = this.q<HTMLElement>("#contact-section");
-    section.addEventListener("click", focusHome);
-    section.addEventListener("keydown", (e) => (e as KeyboardEvent).key === "Enter" && focusHome(e));
+    this.q<HTMLButtonElement>("#contact-entry").addEventListener("click", () => this.handlers.onContactOpen());
     this.q<HTMLInputElement>("#forecast-show").addEventListener("change", (e) => this.handlers.onShowForecast((e.target as HTMLInputElement).checked));
 
     this.setSpeed(opts.stepsPerSecond);
@@ -550,10 +498,11 @@ export class Shell {
     const tag = this.q<HTMLDivElement>("#hover-tag");
     tag.innerHTML = `<strong>${esc(title)}</strong><dl class="metrics">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>`;
     tag.hidden = false;
-    // 放在光标右下方，靠近窗口边缘时翻到另一侧
+    // 放在光标右下方，靠近地图右缘（右侧面板）或窗口底部时翻到另一侧
     const w = tag.offsetWidth;
     const h = tag.offsetHeight;
-    tag.style.left = `${x + 16 + w > innerWidth ? x - w - 16 : x + 16}px`;
+    const right = document.getElementById("app")?.getBoundingClientRect().right ?? innerWidth;
+    tag.style.left = `${x + 16 + w > right ? x - w - 16 : x + 16}px`;
     tag.style.top = `${y + 16 + h > innerHeight ? y - h - 16 : y + 16}px`;
   }
 
@@ -738,59 +687,12 @@ export class Shell {
 
   private feedLabel = "";
 
-  // ---- 紧急联络 ----
-  private queueTab: "call" | "text" = "call";
-
-  setContact(view: ContactView) {
-    const { state, summary } = view;
-    const toggle = this.q<HTMLButtonElement>("#contact-toggle");
-    toggle.textContent = state === "active" || state === "starting" ? "Stop" : "Start";
-    toggle.disabled = state === "starting";
-    const notes: Record<ContactView["state"], string> = {
-      off: "Calls the homes closest to the fire first and texts everyone nearby. Starts on its own when a fire is detected in Respond.",
-      starting: "Loading the household directory…",
-      active: `Calling the nearest homes first on ${summary?.callLines ?? 0} lines; texting every home within 1.5 km. Demo speed ×${summary?.demoSpeed ?? 1}.`,
-      offline: "Needs the backend (localhost:8010). Start it and press Start.",
-    };
-    this.q<HTMLParagraphElement>("#contact-status").textContent = notes[state];
-    const sum = this.q<HTMLDListElement>("#contact-summary");
-    sum.hidden = !summary || state !== "active";
-    if (summary && state === "active") {
-      const rows: [string, number, string][] = [
-        ["Calling", summary.calling, ""],
-        ["Call queue", summary.callQueued, ""],
-        ["Confirmed safe", summary.confirmed, ""],
-        ["Needs help", summary.needsHelp, summary.needsHelp ? "alert" : ""],
-        ["No answer", summary.noAnswer + summary.callFailed, ""],
-        ["Texted", summary.texted, ""],
-        ["Text queue", summary.textQueued + summary.texting, ""],
-      ];
-      sum.innerHTML = rows.map(([k, v, cls]) => `<dt>${k}</dt><dd class="${cls}">${v.toLocaleString("en-US")}</dd>`).join("");
-    }
-    const card = (t: ContactTaskView, live: boolean) => {
-      const status = live ? `<span class="ci-state ${t.status}">${t.status === "ringing" ? "Ringing" : "Talking"} ${fmtClock(t.elapsedS)}</span>` : `<span class="ci-state">${t.status === "needs_help" ? "Asked for help" : ""}</span>`;
-      return `<li class="contact-item${live ? " live" : " help"}" data-building="${esc(t.buildingId)}" tabindex="0">
-        <div class="ci-top"><span class="ci-name">${esc(t.owner)}${t.vulnerable ? ' <span class="ci-tag">Access needs</span>' : ""}</span><span class="ci-phone">${esc(t.phone)}</span></div>
-        <div class="ci-addr">${esc(t.address)}</div>
-        <div class="ci-meta">${status}<span>${fmtEtaText(t.etaMin)}</span></div>
-      </li>`;
-    };
-    this.q<HTMLHeadingElement>("#calling-head").hidden = !view.calling.length;
-    this.q<HTMLUListElement>("#contact-calling").innerHTML = view.calling.map((t) => card(t, true)).join("");
-    this.q<HTMLHeadingElement>("#help-head").hidden = !view.help.length;
-    this.q<HTMLUListElement>("#contact-help").innerHTML = view.help.map((t) => card(t, false)).join("");
-    const showQueue = state === "active" && (view.queue.call.length > 0 || view.queue.text.length > 0);
-    this.q<HTMLDivElement>("#queue-head").hidden = !showQueue;
-    this.q<HTMLSpanElement>("#q-call-n").textContent = String(view.queueTotals.call);
-    this.q<HTMLSpanElement>("#q-text-n").textContent = String(view.queueTotals.text);
-    const items = showQueue ? view.queue[this.queueTab] : [];
-    const total = view.queueTotals[this.queueTab];
-    this.q<HTMLOListElement>("#contact-queue").innerHTML =
-      items
-        .map(
-          (t, i) => `<li data-building="${esc(t.buildingId)}" tabindex="0"><span class="q-rank">${i + 1}</span><span class="q-main"><span class="q-addr">${esc(t.address)}</span><span class="q-owner">${esc(t.owner)}${t.vulnerable ? ' <span class="ci-tag">Access needs</span>' : ""}</span></span><span class="q-eta">${fmtEtaShort(t.etaMin)}</span></li>`,
-        )
-        .join("") + (total > items.length ? `<li class="q-more">${(total - items.length).toLocaleString("en-US")} more</li>` : "");
+  // ---- 紧急联络：左栏只保留一行入口，详情在右侧面板（contactDock.ts） ----
+  setContactEntry(status: string, needsHelp: number) {
+    this.q<HTMLSpanElement>("#contact-entry-sub").textContent = status;
+    const help = this.q<HTMLSpanElement>("#contact-entry-help");
+    help.hidden = !needsHelp;
+    help.textContent = String(needsHelp);
   }
 
   // ---- 侧栏内容 ----

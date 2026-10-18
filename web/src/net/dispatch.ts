@@ -26,6 +26,8 @@ export interface ContactTask {
   channel: "call" | "text";
   status: CallStatus | TextStatus;
   attempt: number;
+  /** 外呼线路（从 1 开始）；通话结束后保留，线路面板据此显示结果 */
+  line: number | null;
   etaMin: number;
   distanceM: number;
   provider: string;
@@ -70,6 +72,8 @@ export class DispatchClient {
   readonly tasks = new Map<string, ContactTask>();
   /** buildingId → 当前最能代表该房屋的联络状态编码（外呼优先于短信） */
   readonly codes = new Map<string, ContactCode>();
+  /** 线路号 → 最近占用该线路的外呼任务 id */
+  private lineTasks = new Map<number, string>();
   /** 状态变化后递增，供地图图层判断是否需要重建贴图 */
   version = 0;
   private ws: WebSocket | null = null;
@@ -100,6 +104,7 @@ export class DispatchClient {
     this.ws = null;
     this.tasks.clear();
     this.codes.clear();
+    this.lineTasks.clear();
     this.summary = null;
     this.version++;
     this.onChange();
@@ -140,11 +145,16 @@ export class DispatchClient {
   private handle(msg: any) {
     if (msg.type === "dispatch_snapshot") {
       this.tasks.clear();
-      for (const t of msg.tasks ?? []) this.tasks.set(t.id, t);
+      this.lineTasks.clear();
+      for (const t of msg.tasks ?? []) {
+        this.tasks.set(t.id, t);
+        this.trackLine(t);
+      }
       this.summary = msg.summary ?? this.summary;
       this.rebuildCodes();
     } else if (msg.type === "contact" && msg.task) {
       this.tasks.set(msg.task.id, msg.task);
+      this.trackLine(msg.task);
       this.updateCode(msg.task.household.buildingId);
     } else if (msg.type === "dispatch_summary") {
       const { type: _t, sequence: _s, emittedAt: _e, ...summary } = msg;
@@ -154,6 +164,13 @@ export class DispatchClient {
     }
     this.version++;
     this.onChange();
+  }
+
+  /** 同一条线路上更新时间最晚的任务就是线路当前的任务 */
+  private trackLine(t: ContactTask) {
+    if (t.channel !== "call" || !t.line) return;
+    const current = this.tasks.get(this.lineTasks.get(t.line) ?? "");
+    if (!current || current.id === t.id || current.updatedAt <= t.updatedAt) this.lineTasks.set(t.line, t.id);
   }
 
   private rebuildCodes() {
@@ -182,6 +199,16 @@ export class DispatchClient {
     }
     if (code === ContactCode.None) this.codes.delete(buildingId);
     else this.codes.set(buildingId, code);
+  }
+
+  /** 每条线路当前的任务（通话中，或刚结束的结果）；空闲为 null */
+  lines(): (ContactTask | null)[] {
+    const n = Math.max(this.summary?.callLines ?? 0, ...this.lineTasks.keys(), 0);
+    return Array.from({ length: n }, (_, i) => {
+      const t = this.tasks.get(this.lineTasks.get(i + 1) ?? "");
+      // 重拨的任务会换到别的线路，旧线路不再显示它
+      return t && t.line === i + 1 ? t : null;
+    });
   }
 
   /** 正在外呼的任务（最早开始的在前） */

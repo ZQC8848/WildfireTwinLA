@@ -50,13 +50,19 @@ export function createScene(container: HTMLElement): SceneContext {
   stats.dom.classList.add("stats");
   document.body.appendChild(stats.dom);
 
-  window.addEventListener("resize", () => {
-    camera.aspect = container.clientWidth / container.clientHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    for (const fn of resizeCallbacks) fn(container.clientWidth, container.clientHeight);
-  });
   const resizeCallbacks: ((w: number, h: number) => void)[] = [];
+  // 跟随容器而不是窗口：右侧联络面板展开或收起时，地图宽度也会变
+  let size = "";
+  new ResizeObserver(() => {
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    if (!w || !h || `${w}x${h}` === size) return;
+    size = `${w}x${h}`;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+    for (const fn of resizeCallbacks) fn(w, h);
+  }).observe(container);
 
   const callbacks: ((dt: number) => void)[] = [];
   const timer = new THREE.Timer();
