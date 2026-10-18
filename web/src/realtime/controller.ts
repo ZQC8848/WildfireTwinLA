@@ -75,6 +75,10 @@ export class RealtimeController {
   /** 回放时钟：最近一个事件的事件时间与对应的墙钟时间 */
   private clockEvent = 0;
   private clockWall = 0;
+  /** 最后收到的事件的时间（毫秒时间戳） */
+  private lastEventTime = 0;
+  /** 回放倍速：每秒墙钟 = REPLAY_MINUTES_PER_SECOND × replaySpeed 分钟事件时间 */
+  replaySpeed = REPLAY_SPEED;
 
   constructor(private d: RealtimeDeps) {
     this.client = new FeedClient(
@@ -89,7 +93,19 @@ export class RealtimeController {
   /** 回放进行中时，模拟应当所在的时刻（分钟）；不在回放或回放结束后为 null，模拟按自己的速度运行 */
   replayMinutes(now = performance.now()): number | null {
     if (this.client.mode !== "replay" || this.t0 === null || this.client.state === "ended") return null;
-    return (this.clockEvent - this.t0) / 60000 + ((now - this.clockWall) / 1000) * REPLAY_MINUTES_PER_SECOND * REPLAY_SPEED;
+    return (this.clockEvent - this.t0) / 60000 + ((now - this.clockWall) / 1000) * REPLAY_MINUTES_PER_SECOND * this.replaySpeed;
+  }
+
+  /** 回放中途改变倍速：先把时钟锚定在当前位置，再让数据源从当前进度按新倍速继续 */
+  setReplaySpeed(speed: number) {
+    if (this.client.mode !== "replay" || this.t0 === null || this.client.state === "ended" || speed === this.replaySpeed) return;
+    const now = performance.now();
+    const minutes = this.replayMinutes(now)!;
+    this.clockEvent = this.t0 + minutes * 60000;
+    this.clockWall = now;
+    this.replaySpeed = speed;
+    const toOffset = (ms: number) => (ms - this.t0!) / 60000 / REPLAY_MINUTES_PER_SECOND;
+    this.client.setReplaySpeed(speed, toOffset(this.lastEventTime), toOffset(this.clockEvent));
   }
 
   /** 回放是否由存档原始数据现场拼出（还没有后端的回放文件） */
@@ -116,7 +132,8 @@ export class RealtimeController {
     return this.client.mode;
   }
 
-  start(mode: FeedMode) {
+  /** 开始接入；replaySpeed 为回放倍速（紧急联络开启时从一开始就放慢） */
+  start(mode: FeedMode, replaySpeed = REPLAY_SPEED) {
     this.client.stop();
     this.t0 = null;
     this.hotspotsReceived = 0;
@@ -126,6 +143,9 @@ export class RealtimeController {
     this.reports = [];
     this.coverage.fill(0);
     this.clockEvent = 0;
+    this.lastEventTime = 0;
+    this.replaySpeed = replaySpeed;
+    this.client.replaySpeed = replaySpeed;
     if (mode !== "off") {
       // 每次接入都从干净的状态开始：清掉测试火、火点标记与火界
       this.d.resetSim();
@@ -254,6 +274,7 @@ export class RealtimeController {
     if (this.t0 === null && e.kind !== "error") this.t0 = e.time;
     if (e.kind !== "error") {
       this.clockEvent = Math.max(this.clockEvent, e.time);
+      this.lastEventTime = Math.max(this.lastEventTime, e.time);
       this.clockWall = performance.now();
     }
     // 回放：先把模拟推进到事件时刻，事件流里的时间才与真实时间对应

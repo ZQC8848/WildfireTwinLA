@@ -30,12 +30,16 @@ const OVERLAP_PX = 30;
 const MAX_BUBBLES = 160;
 const POP_MS = 450;
 const FADE_MS = 160;
-const PRIORITY: Record<HomeState, number> = { burning: 0, threat: 1, burned: 2 };
+// 需要帮助与外呼中的房屋很少，却是紧急联络的主角，排在最前，不会被数量上限挤掉
+const PRIORITY: Record<HomeState, number> = { help: 0, calling: 1, burning: 2, threat: 3, burned: 4 };
+const ORDER: HomeState[] = ["help", "calling", "burning", "threat", "burned"];
 
 const ICONS: Record<HomeState, string> = {
   burning: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8.6 1.2c.4 2.3-1 3.4-2 4.6C5.5 7 4.6 8.2 4.6 10a3.4 3.4 0 0 0 6.8 0c0-1.4-.6-2.3-1.2-3 .1 1.1-.3 1.9-1 2.2.3-2-.2-3.4-.6-4.3.9-.8 1.2-2.2 0-3.7z" fill="currentColor"/></svg>`,
   burned: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 7.5 8 3l5.5 4.5V13h-11z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6.2 13l1.6-2.6-1.2-1.4L8.4 7" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`,
   threat: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2 14.5 13.5h-13z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6.3v3.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.6" r=".9" fill="currentColor"/></svg>`,
+  calling: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.2 2.5 3.4 3.1c-.9.4-1.3 1.4-1 2.3 1.4 4 4.2 6.8 8.2 8.2.9.3 1.9-.1 2.3-1l.6-1.8-2.8-1.6-1.3 1.2C7.9 9.6 6.4 8.1 5.6 6.6l1.2-1.3z" fill="currentColor"/><path d="M10 2.5a4 4 0 0 1 3.5 3.5M10 4.7a1.8 1.8 0 0 1 1.3 1.3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`,
+  help: `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 4.6v4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="8" cy="11.3" r="1" fill="currentColor"/></svg>`,
 };
 
 interface Cluster {
@@ -65,6 +69,8 @@ export interface HomeAlertHandlers {
   onHover(title: string, rows: [string, string][], x: number, y: number): void;
   onLeave(): void;
   onFly(target: THREE.Vector3, distance: number): void;
+  /** 点击气泡时，气泡包含的房屋（用于在联络面板里定位通话中的那户） */
+  onPick?(alerts: HomeAlert[]): void;
 }
 
 export class HomeAlerts {
@@ -132,7 +138,7 @@ export class HomeAlerts {
       const key = `${level}:${Math.floor(a.anchor.x / size)}:${Math.floor(a.anchor.z / size)}`;
       let c = map.get(key);
       if (!c) {
-        c = { key, anchor: new THREE.Vector3(), n: 0, dist: 0, counts: { burning: 0, burned: 0, threat: 0 }, top: a, members: [], newest: 0 };
+        c = { key, anchor: new THREE.Vector3(), n: 0, dist: 0, counts: { burning: 0, burned: 0, threat: 0, calling: 0, help: 0 }, top: a, members: [], newest: 0 };
         map.set(key, c);
       }
       c.anchor.add(a.anchor);
@@ -277,6 +283,7 @@ export class HomeAlerts {
       const c = el.bubble?.cluster;
       if (!c) return;
       const spread = Math.max(...c.members.map((m) => m.anchor.distanceTo(c.anchor)));
+      this.handlers.onPick?.(c.members);
       this.handlers.onFly(c.anchor.clone(), c.n === 1 ? 260 : Math.max(450, spread * 2.6));
     });
     this.root.appendChild(el);
@@ -294,8 +301,8 @@ export class HomeAlerts {
   }
 
   private label(c: Cluster): string {
-    const names: Record<HomeState, string> = { burning: "on fire", burned: "destroyed", threat: "threatened" };
-    return (["burning", "threat", "burned"] as HomeState[])
+    const names: Record<HomeState, string> = { burning: "on fire", burned: "destroyed", threat: "threatened", calling: "being called", help: "asking for help" };
+    return ORDER
       .filter((s) => c.counts[s] > 0)
       .map((s) => `${c.counts[s]} ${c.counts[s] === 1 ? "home" : "homes"} ${names[s]}`)
       .join(", ");
@@ -304,6 +311,8 @@ export class HomeAlerts {
   private clusterCard(c: Cluster): { title: string; rows: [string, string][] } {
     const rows: [string, string][] = [];
     if (c.counts.burning) rows.push(["On fire", String(c.counts.burning)]);
+    if (c.counts.help) rows.push(["Needs help", String(c.counts.help)]);
+    if (c.counts.calling) rows.push(["Being called", String(c.counts.calling)]);
     if (c.counts.threat) rows.push(["Threatened", c.minEta !== undefined ? `${c.counts.threat}, first in ${fmtEta(c.minEta)}` : String(c.counts.threat)]);
     if (c.counts.burned) rows.push(["Destroyed", String(c.counts.burned)]);
     rows.push(["", "Click to zoom in"]);

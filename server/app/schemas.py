@@ -107,6 +107,20 @@ class RetellWebhookEvent(BaseModel):
     call: dict[str, Any]
 
 
+class DispatchStart(BaseModel):
+    demo_speed: float | None = Field(default=None, gt=0, le=100)
+    call_lines: int | None = Field(default=None, ge=1, le=50)
+
+
+class DispatchFire(BaseModel):
+    """Burning cells (grid indices) and optional model arrival times per building (minutes)."""
+
+    cells: list[int] = Field(max_length=20000)
+    etas: dict[str, float] | None = None
+    wind_from_deg: float | None = None
+    wind_speed_ms: float | None = Field(default=None, ge=0, le=80)
+
+
 class ServerMessage(BaseModel):
     type: str
     sequence: int

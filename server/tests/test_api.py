@@ -9,6 +9,12 @@ def test_health_registration_and_websocket_snapshot(tmp_path, monkeypatch) -> No
     monkeypatch.setattr(main, "store", test_store)
     monkeypatch.setattr(main, "service", None)
 
+    async def no_preload() -> None:
+        return None
+
+    # The household directory is generated from the real grid; not needed for these endpoints
+    monkeypatch.setattr(main.dispatcher, "preload", no_preload)
+
     with TestClient(main.app) as client:
         assert client.get("/healthz").json() == {"status": "ok"}
         assert client.get("/readyz").status_code == 200

@@ -36,8 +36,11 @@ export interface ShellHandlers {
   onForecast(): void;
   onShowAlerts(show: boolean): void;
   onShowMarkers(show: boolean): void;
+  onShowContact(show: boolean): void;
   onCameraMode(mode: "orbit" | "fly"): void;
   onNorth(): void;
+  /** 左栏的紧急联络入口：展开右侧面板 */
+  onContactOpen(): void;
   onShowForecast(show: boolean): void;
   onShowSmoke(show: boolean): void;
   onTool(tool: Tool | null): void;
@@ -78,6 +81,7 @@ const TOOL_ICONS = {
   smoke: svg(`<path d="M4.5 12.5h7a3 3 0 0 0 .3-6 4 4 0 0 0-7.6-.8 3.4 3.4 0 0 0 .3 6.8z"/>`),
   alerts: svg(`<path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/><path d="M8 5.5v2.2"/><path d="M8 9.3v.01"/>`),
   markers: svg(`<path d="M4 14V6M8 14V2M12 14V8"/>`),
+  phone: svg(`<path d="M5.2 2.5 3.4 3.1c-.9.4-1.3 1.4-1 2.3 1.4 4 4.2 6.8 8.2 8.2.9.3 1.9-.1 2.3-1l.6-1.8-2.8-1.6-1.3 1.2C7.9 9.6 6.4 8.1 5.6 6.6l1.2-1.3z"/>`),
   chevron: svg(`<path d="M4 6l4 4 4-4"/>`),
 };
 
@@ -181,6 +185,14 @@ export class Shell {
           <div class="closest-note" id="closest-note"></div>
         </div>
       </section>
+      <section data-mode-only="respond">
+        <button class="contact-entry" id="contact-entry" aria-controls="contact-dock">
+          ${TOOL_ICONS.phone}
+          <span class="ce-main"><span class="ce-title">Emergency contact</span><span class="ce-sub" id="contact-entry-sub"></span></span>
+          <span class="dock-badge help" id="contact-entry-help" title="Needs help" hidden></span>
+          <span class="ce-go" aria-hidden="true">›</span>
+        </button>
+      </section>
       <section data-mode-only="respond" id="forecast-section">
         <h2>Forecast, next 8 hours</h2>
         <button class="btn btn-block" id="forecast-run" disabled>Run 64-run forecast</button>
@@ -196,10 +208,6 @@ export class Shell {
       <section data-mode-only="respond">
         <h2>Homes in the fire area</h2>
         <dl class="metrics" id="homes"></dl>
-      </section>
-      <section data-mode-only="respond" id="calls-section" hidden>
-        <h2>Calls to residents</h2>
-        <dl class="metrics" id="calls"></dl>
       </section>
       <section data-mode-only="respond">
         <h2>Feed</h2>
@@ -272,6 +280,7 @@ export class Shell {
         <button class="tool-btn toggle" id="show-smoke" aria-pressed="true">${TOOL_ICONS.smoke}<span>Smoke</span></button>
         <button class="tool-btn toggle" id="show-alerts" aria-pressed="true" title="Shortcut: H">${TOOL_ICONS.alerts}<span>Home alerts</span><span class="tool-badge" id="alerts-count" hidden></span><kbd>H</kbd></button>
         <button class="tool-btn toggle" id="show-markers" aria-pressed="true">${TOOL_ICONS.markers}<span>Satellite hotspots</span></button>
+        <button class="tool-btn toggle" id="show-contact" aria-pressed="true">${TOOL_ICONS.phone}<span>Contact status</span></button>
       </div>`;
     const layerOptions = (Object.keys(LAYERS) as LayerId[]).map((id) => `<option value="${id}">${LAYERS[id].label}</option>`).join("");
     const corner = el("div", { class: "map-legend", id: "map-legend" });
@@ -326,6 +335,7 @@ export class Shell {
     toggle("#show-smoke", (on) => this.handlers.onShowSmoke(on));
     toggle("#show-alerts", (on) => this.handlers.onShowAlerts(on));
     toggle("#show-markers", (on) => this.handlers.onShowMarkers(on));
+    toggle("#show-contact", (on) => this.handlers.onShowContact(on));
     this.q<HTMLButtonElement>("#compass").addEventListener("click", () => this.handlers.onNorth());
     this.q<HTMLButtonElement>("#legend-toggle").addEventListener("click", () => this.setLegendOpen(!this.legendOpen, true));
     this.q<HTMLButtonElement>("#map-toast-close").addEventListener("click", () => (this.q<HTMLDivElement>("#map-toast").hidden = true));
@@ -381,6 +391,7 @@ export class Shell {
       this.handlers.onCameraMode(mode);
     });
     this.q<HTMLButtonElement>("#forecast-run").addEventListener("click", () => this.handlers.onForecast());
+    this.q<HTMLButtonElement>("#contact-entry").addEventListener("click", () => this.handlers.onContactOpen());
     this.q<HTMLInputElement>("#forecast-show").addEventListener("change", (e) => this.handlers.onShowForecast((e.target as HTMLInputElement).checked));
 
     this.setSpeed(opts.stepsPerSecond);
@@ -487,10 +498,11 @@ export class Shell {
     const tag = this.q<HTMLDivElement>("#hover-tag");
     tag.innerHTML = `<strong>${esc(title)}</strong><dl class="metrics">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>`;
     tag.hidden = false;
-    // 放在光标右下方，靠近窗口边缘时翻到另一侧
+    // 放在光标右下方，靠近地图右缘（右侧面板）或窗口底部时翻到另一侧
     const w = tag.offsetWidth;
     const h = tag.offsetHeight;
-    tag.style.left = `${x + 16 + w > innerWidth ? x - w - 16 : x + 16}px`;
+    const right = document.getElementById("app")?.getBoundingClientRect().right ?? innerWidth;
+    tag.style.left = `${x + 16 + w > right ? x - w - 16 : x + 16}px`;
     tag.style.top = `${y + 16 + h > innerHeight ? y - h - 16 : y + 16}px`;
   }
 
@@ -675,14 +687,12 @@ export class Shell {
 
   private feedLabel = "";
 
-  setCalls(t: { confirmed: number; noAnswer: number; needsHelp: number; other: number } | null) {
-    const total = t ? t.confirmed + t.noAnswer + t.needsHelp + t.other : 0;
-    this.q<HTMLElement>("#calls-section").hidden = !total;
-    if (!t || !total) return;
-    this.q<HTMLDListElement>("#calls").innerHTML =
-      `<dt>Confirmed</dt><dd>${t.confirmed}</dd><dt>No answer</dt><dd>${t.noAnswer}</dd>` +
-      `<dt>Needs help</dt><dd class="${t.needsHelp ? "ember" : ""}">${t.needsHelp}</dd>` +
-      (t.other ? `<dt>In progress</dt><dd>${t.other}</dd>` : "");
+  // ---- 紧急联络：左栏只保留一行入口，详情在右侧面板（contactDock.ts） ----
+  setContactEntry(status: string, needsHelp: number) {
+    this.q<HTMLSpanElement>("#contact-entry-sub").textContent = status;
+    const help = this.q<HTMLSpanElement>("#contact-entry-help");
+    help.hidden = !needsHelp;
+    help.textContent = String(needsHelp);
   }
 
   // ---- 侧栏内容 ----

@@ -9,7 +9,8 @@ import * as THREE from "three";
 import type { Building, Community, Grid } from "@core";
 import { ENSEMBLE_FACTOR, type EnsembleResult } from "./ensemble";
 
-export type HomeState = "burning" | "burned" | "threat";
+/** calling / help 来自紧急联络（net/dispatch.ts），其余来自火势模拟 */
+export type HomeState = "burning" | "burned" | "threat" | "calling" | "help";
 
 export interface HomeAlert {
   /** buildings 数组中的序号 */
@@ -49,6 +50,8 @@ export interface HomeStatusInput {
   /** 火线推进速度（米 / 模拟分钟），用于没有预报时估算到达时间 */
   spreadRate: number;
   treatMask: Uint8Array;
+  /** 紧急联络：正在外呼或需要帮助的房屋（buildingId → 状态） */
+  contacts?: Map<string, "calling" | "help">;
 }
 
 export class HomeStatus {
@@ -87,6 +90,9 @@ export class HomeStatus {
       } else if (threats?.has(i)) {
         s = "threat";
       }
+      // 联络状态优先于"受威胁"和"烧毁"，但不盖过"着火"：需要帮助的住户即使房子已烧毁也要显示
+      const contact = live ? input.contacts?.get(b.id) : undefined;
+      if (contact && s !== "burning") s = contact;
       if (!s) return;
       seen.add(i);
       const p = this.prev.get(i);
@@ -99,7 +105,7 @@ export class HomeStatus {
         state: s,
         anchor: this.anchors[i],
         since,
-        ignitedMin: s !== "threat" ? arrival : undefined,
+        ignitedMin: s === "burning" || s === "burned" ? arrival : undefined,
         etaMin: t?.eta,
         chance: t?.chance,
         distanceM: t?.distance,

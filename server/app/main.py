@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 from collections import defaultdict, deque
@@ -16,15 +17,20 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
+from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .contracts import official_order_message, wind_message
+from .dispatch import ContactTask, Dispatcher
+from .households import generate_households
 from .realtime import RealtimeHub
 from .replay import stream_replay
 from .retell import RetellGateway, webhook_status
 from .schemas import (
     AlertResult,
     ArrivalRisk,
+    DispatchFire,
+    DispatchStart,
     Incident,
     OfficialOrder,
     OfficialOrderCreate,
@@ -43,6 +49,31 @@ retell = RetellGateway(
     settings.retell_api_key, settings.retell_from_number, settings.retell_agent_id
 )
 service: BackendService | None = None
+dispatch_hub = RealtimeHub()
+
+
+async def real_call(task: ContactTask) -> str | None:
+    """Call through Retell only for a building with a consented, registered resident."""
+    resident = store.resident_for_building(task.household.building_id)
+    if not resident or not retell.configured:
+        return None
+    return await retell.create_alert_call(
+        attempt_id=task.id,
+        resident=resident,
+        community_id=task.household.community_id or resident["community_id"],
+        level="imminent" if task.eta_min <= 30 else "warning",
+        eta_min=task.eta_min,
+    )
+
+
+dispatcher = Dispatcher(
+    lambda: generate_households(settings.grid_dir),
+    dispatch_hub.broadcast,
+    call_lines=settings.dispatch_call_lines,
+    sms_per_second=settings.dispatch_sms_per_second,
+    demo_speed=settings.dispatch_demo_speed,
+    real_caller=real_call if settings.dispatch_real_calls else None,
+)
 registration_attempts: dict[str, deque[float]] = defaultdict(deque)
 
 
@@ -56,14 +87,23 @@ async def lifespan(_: FastAPI):
     )
     service = BackendService(settings, store, hub, client, retell)
     service.start()
+    preload = asyncio.create_task(dispatcher.preload())
     try:
         yield
     finally:
+        preload.cancel()
         await service.stop()
+        await dispatcher.stop()
         await client.aclose()
 
 
 app = FastAPI(title="WildfireTwinLA API", version="0.3.0", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(settings.cors_origins),
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type", "X-Revocation-Token"],
+)
 
 
 @app.middleware("http")
@@ -191,6 +231,44 @@ async def ingest_official_order(
     return saved
 
 
+@app.post("/api/v1/dispatch/start")
+async def dispatch_start(body: DispatchStart) -> dict:
+    """Start the emergency contact pipeline (idempotent)."""
+    return await dispatcher.start(body.demo_speed, body.call_lines)
+
+
+@app.post("/api/v1/dispatch/stop", status_code=204)
+async def dispatch_stop() -> Response:
+    await dispatcher.stop()
+    return Response(status_code=204)
+
+
+@app.post("/api/v1/dispatch/fire")
+async def dispatch_fire(body: DispatchFire) -> dict:
+    """Fire cells and optional model arrival times from the simulator; reprioritizes the queues."""
+    created = await dispatcher.update_fire(
+        body.cells, settings.grid_width, body.etas, body.wind_from_deg, body.wind_speed_ms
+    )
+    return {"created": created, **dispatcher.summary()}
+
+
+@app.get("/api/v1/dispatch/state")
+def dispatch_state() -> dict:
+    return dispatcher.snapshot()
+
+
+@app.websocket("/ws/dispatch")
+async def dispatch_socket(websocket: WebSocket) -> None:
+    await dispatch_hub.connect(websocket)
+    await websocket.send_json({"type": "dispatch_snapshot", **dispatcher.snapshot()})
+    try:
+        while True:
+            if await websocket.receive_text() == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        await dispatch_hub.disconnect(websocket)
+
+
 @app.post("/webhooks/retell", status_code=204)
 async def retell_webhook(
     request: Request, x_retell_signature: str | None = Header(default=None)
@@ -212,6 +290,8 @@ async def retell_webhook(
             status=call_status,
             details=payload.call,
         )
+    if metadata.get("attempt_id"):
+        await dispatcher.on_provider_status(str(metadata["attempt_id"]), call_status)
     await hub.broadcast(
         "call_status",
         {
@@ -228,6 +308,7 @@ async def websocket_endpoint(
     mode: str = "live",
     event: str | None = None,
     speed: float = 20,
+    start: float = 0,
 ) -> None:
     replay_event = event or "norte"
     if mode not in {"live", "replay"} or (
@@ -241,7 +322,7 @@ async def websocket_endpoint(
             settings.replay_path if replay_event == "norte" else settings.eaton_replay_path
         )
         try:
-            await stream_replay(websocket, replay_path, speed)
+            await stream_replay(websocket, replay_path, speed, max(0.0, start))
         except FileNotFoundError:
             await websocket.send_json({"type": "error", "detail": "replay dataset unavailable"})
         finally:

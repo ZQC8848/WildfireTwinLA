@@ -678,6 +678,21 @@ export class Terrain {
     this.uniforms.uDamage.value = tex;
   }
 
+  /** 只写深度的地形副本（共用几何体与 uniforms，片元 shader 为空），供描边遮罩判断房屋是否被山体挡住 */
+  createDepthMesh(): THREE.Mesh {
+    const material = new THREE.ShaderMaterial({
+      glslVersion: THREE.GLSL3,
+      vertexShader,
+      fragmentShader: "void main() {}",
+      uniforms: this.uniforms,
+      colorWrite: false,
+    });
+    const mesh = new THREE.Mesh(this.mesh.geometry, material);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = -1;
+    return mesh;
+  }
+
   /** 显示或隐藏报告受损区域（只在 Respond 模式显示） */
   showDamageArea(show: boolean) {
     this.uniforms.uHasDamage.value = show && !!this.uniforms.uDamage.value;
