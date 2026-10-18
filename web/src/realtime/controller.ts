@@ -64,6 +64,8 @@ export class RealtimeController {
   hotspotsReceived = 0;
   perimeter: Uint8Array | null = null;
   perimeterHa = 0;
+  /** 火界的名称（按来源）："Official perimeter"、"Satellite-detected area (VIIRS, coarse)" 等 */
+  perimeterLabel = "Official perimeter";
   passes: SatellitePass[] = [];
   reports: { minutes: number; name: string }[] = [];
   private t0: number | null = null;
@@ -150,6 +152,11 @@ export class RealtimeController {
       this.d.setRunning(false);
     }
     this.d.onChange();
+  }
+
+  /** 某栋房屋最近一次外呼的结果（confirmed、no_answer、needs_help 等）；没有记录时为 undefined */
+  callStatus(buildingId: string): string | undefined {
+    return this.calls.get(buildingId);
   }
 
   callTally(): CallTally {
@@ -249,6 +256,8 @@ export class RealtimeController {
       this.clockEvent = Math.max(this.clockEvent, e.time);
       this.clockWall = performance.now();
     }
+    // 回放：先把模拟推进到事件时刻，事件流里的时间才与真实时间对应
+    if (e.kind === "official" || e.kind === "incident" || e.kind === "alert") this.catchUp(e.time);
     const now = sim.minutes;
     switch (e.kind) {
       case "snapshot":
@@ -293,7 +302,9 @@ export class RealtimeController {
       case "incident":
         if (e.perimeterCells?.length) {
           this.setPerimeter(e.perimeterCells);
-          monitor.log(now, `Official perimeter received: ${Math.round(this.perimeterHa).toLocaleString("en-US")} ha`, "warning");
+          this.perimeterLabel = e.perimeterLabel ?? "Official perimeter";
+          const note = e.perimeterOfficial === false ? " (not an official perimeter)" : "";
+          monitor.log(now, `${this.perimeterLabel} received: ${Math.round(this.perimeterHa).toLocaleString("en-US")} ha${note}`, "warning");
         } else {
           monitor.log(now, `Incident ${e.id} grouped from satellite hotspots`, "watch");
         }

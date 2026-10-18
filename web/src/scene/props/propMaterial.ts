@@ -1,6 +1,7 @@
 // 植被与建筑共用的实例化 shader：
 // - 每个实例只存 (x, 高程, z, 旋转) 与 (缩放, 格子号)，显示高度在 shader 中按竖向夸张计算，滑块调整无需重建
-// - 按所在格子的火灾状态改变外观：燃烧中发出火光，燃尽后树冠 / 屋顶（aPart = 0）消失、其余部分变焦黑
+// - 按所在格子的火灾状态改变外观：燃烧中发出火光；燃尽后树冠（aPart = 0）消失、其余部分变焦黑。
+//   建筑（缩放存为负数作标记，见 propField）燃尽后整体压低成焦黑残骸，起火后约 2 小时内残骸里有余烬闪烁
 // - 状态来源：P2 的模拟状态纹理（uUseState）；尚无模拟时可用 uBurnOn 的圆环做预览
 // - 玻璃（aPart = 2）在夜间（uNight）亮灯
 
@@ -10,7 +11,7 @@ const vertexShader = /* glsl */ `
 in vec4 aColor;
 in float aPart;
 in vec4 aOffset; // x, 地面高程（米）, z, 绕 Y 旋转
-in vec2 aParams; // 缩放, 格子号
+in vec2 aParams; // 缩放（建筑为负数）, 格子号
 
 uniform float uVScale;
 uniform float uMinElev;
@@ -33,8 +34,17 @@ flat out float vPart;
 flat out float vState;
 out float vLocalY;
 out float vSeed;
+flat out float vBuilding;
+out float vAge;        // 着火后经过的分钟数（显示时刻）
+out vec3 vLocalPos;
 
 #include <fog_pars_vertex>
+
+float arrivalAt(float cell) {
+  int c = int(cell + 0.5);
+  int w = int(uGridSize.x);
+  return texelFetch(uState, ivec2(c % w, c / w), 0).b;
+}
 
 float stateAt(float cell, vec2 xz) {
   if (uUseState) {
@@ -55,7 +65,8 @@ float stateAt(float cell, vec2 xz) {
 }
 
 void main() {
-  float s = aParams.x;
+  float s = abs(aParams.x);
+  bool building = aParams.x < 0.0;
   float c = cos(aOffset.w);
   float sn = sin(aOffset.w);
   float st = stateAt(aParams.y, aOffset.xz);
@@ -69,8 +80,10 @@ void main() {
     if (t == 3) s *= 0.8;
   }
   vec3 p = position * s;
-  if (aPart < 0.5) {
-    if (st > 1.5) p *= 0.0; // 燃尽：树冠、屋顶塌缩消失
+  // 燃尽的建筑：屋顶与墙体一起压低到约四成高度，留下焦黑残骸（屋顶不再整个消失）
+  if (building && st > 1.5) p.y *= 0.42;
+  if (aPart < 0.5 && !building) {
+    if (st > 1.5) p *= 0.0; // 燃尽：树冠塌缩消失
     float ph = aOffset.x * 0.13 + aOffset.z * 0.07;
     p.x += sin(uTime * 1.3 + ph) * 0.01 * p.y * uSway;
     p.z += cos(uTime * 1.1 + ph) * 0.01 * p.y * uSway;
@@ -84,6 +97,9 @@ void main() {
   vState = st;
   vLocalY = position.y;
   vSeed = fract(sin(aParams.y * 12.9898) * 43758.5453);
+  vBuilding = building ? 1.0 : 0.0;
+  vAge = uUseState && st > 0.5 ? uViewMinutes - arrivalAt(aParams.y) : 0.0;
+  vLocalPos = position;
 
   vec4 mvPosition = modelViewMatrix * vec4(world, 1.0);
   gl_Position = projectionMatrix * mvPosition;
@@ -105,8 +121,17 @@ flat in float vPart;
 flat in float vState;
 in float vLocalY;
 in float vSeed;
+flat in float vBuilding;
+in float vAge;
+in vec3 vLocalPos;
 
 #include <fog_pars_fragment>
+
+float hash13(vec3 p) {
+  p = fract(p * 0.1031);
+  p += dot(p, p.zyx + 31.32);
+  return fract((p.x + p.y) * p.z);
+}
 
 void main() {
   vec3 n = normalize(vNormalW);
@@ -119,6 +144,13 @@ void main() {
 
   if (vState > 1.5) {
     col = mix(col, vec3(0.045, 0.04, 0.035), 0.85);
+    if (vBuilding > 0.5) {
+      // 残骸里零星的余烬：约 1.5 m 的斑块随机闪烁，起火后 2 小时内逐渐熄灭
+      float cellNoise = hash13(floor(vLocalPos * 0.7) + vSeed * 17.0);
+      float flick = 0.6 + 0.4 * sin(uTime * (2.0 + 3.0 * cellNoise) + cellNoise * 40.0);
+      float smoulder = step(0.82, cellNoise) * flick * (1.0 - smoothstep(30.0, 120.0, vAge));
+      glow += vec3(1.0, 0.32, 0.06) * smoulder * 1.4;
+    }
   } else if (vState > 0.5) {
     float f = fract(sin(floor(uTime * 9.0 + vSeed * 7.0) * 12.9898 + vSeed * 78.233) * 43758.5453);
     f = mix(f, 0.5 + 0.5 * sin(uTime * 13.0 + vLocalY * 2.5 + vSeed * 30.0), 0.5);

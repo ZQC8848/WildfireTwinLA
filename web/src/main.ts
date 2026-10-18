@@ -28,6 +28,14 @@ import { Bloom } from "./scene/post";
 import { CameraRig } from "./scene/cameraRig";
 import { cellXY } from "@core";
 import { NORTE_SCENARIO, norteIgnitionCells } from "./data/norte";
+import { FUEL_GROUP_COLORS, FuelGroup, fuelGroups, fuelModelName } from "./data/fuelModel";
+import { LAYERS } from "./scene/layers";
+import { loadRoads, rasterizeRoads } from "./scene/roads";
+import { HomeStatus, type HomeAlert } from "./sim/homeStatus";
+import { HomeAlerts } from "./ui/homeAlerts";
+import { HouseFlames } from "./scene/houseFlames";
+import { FlyControls } from "./scene/flyControls";
+import { sampleElevation, worldToGrid } from "./scene/coords";
 import { ENSEMBLE_FACTOR, ENSEMBLE_MEMBERS, Ensemble, communityOutlook, type CommunityOutlook, type EnsembleResult } from "./sim/ensemble";
 
 const q = new URLSearchParams(location.search);
@@ -39,16 +47,62 @@ const { grid } = bundle;
 const { meta } = grid;
 const ctx = createScene(document.getElementById("app")!);
 
-const terrain = new Terrain(grid, 1.5, bundle.source === "mock");
+// LANDFIRE 燃料类别（有 fuel-model.bin 时）：地表按类别着色，水面用其中的水体
+const groups = bundle.fuelModel ? fuelGroups(bundle.fuelModel) : undefined;
+const terrain = new Terrain(grid, 1.5, bundle.source === "mock", groups);
+// OSM 路网（可选 roads.json）：异步加载后光栅化成贴图，不阻塞首屏
+loadRoads().then((roads) => {
+  if (!roads) return;
+  const size = Math.min(4096, ctx.renderer.capabilities.maxTextureSize);
+  const tex = rasterizeRoads(roads, meta.width, meta.cellSize, size);
+  tex.anisotropy = ctx.renderer.capabilities.getMaxAnisotropy();
+  terrain.setRoads(tex);
+});
+// 报告受损区域（buildings.json 的 reportedDamageArea，街道级别，不是逐户确认）：Respond 模式下画成虚线轮廓
+const damageCells = bundle.buildings.filter((b) => (b as { reportedDamageArea?: boolean }).reportedDamageArea).map((b) => b.cell);
+terrain.setDamageArea(damageCells);
+if (groups) {
+  LAYERS.natural.swatches = [
+    { label: "Cured grass", color: FUEL_GROUP_COLORS[FuelGroup.Grass]! },
+    { label: "Grass and sage scrub", color: FUEL_GROUP_COLORS[FuelGroup.GrassShrub]! },
+    { label: "Chaparral and woodland", color: FUEL_GROUP_COLORS[FuelGroup.Shrub]! },
+    { label: "Developed land (satellite image)", color: "#8a8478" },
+    { label: "Highways and major roads", color: "#d9c99a" },
+    { label: "Streets and dirt roads", color: "#b3ada1" },
+    { label: "Water", color: "#3f5f6a" },
+  ];
+}
+// 数据署名（地图左下角）：Copernicus 与 OpenStreetMap 的使用条款要求注明出处
+const ATTRIBUTION = {
+  fuels: "Fuels: LANDFIRE",
+  image: "Imagery: modified Copernicus Sentinel-2 data (2026)",
+  roads: "Map data: © OpenStreetMap contributors",
+};
+let attribution = groups ? [ATTRIBUTION.fuels, ATTRIBUTION.image, ATTRIBUTION.roads] : [];
 ctx.scene.add(terrain.mesh);
 
-// Tia 导出与网格对齐的真彩色底图后自动启用；合成网格没有对应底图
-if (bundle.source === "real") {
+// 建成区配色。默认 hybrid：城区用与网格对齐的 Sentinel-2 真彩色底图（data/satellite.jpg），
+// 野外保留燃料配色并叠加影像的明暗纹理。底图缺失时退回 concrete（暖灰）。
+// 对比用：?palette=concrete | sage | recede | hybrid | satellite（satellite 为整片影像，不显示燃料类别）
+const PALETTES = ["concrete", "sage", "recede", "hybrid"];
+const paletteQ = q.get("palette") ?? (groups ? "hybrid" : "concrete");
+terrain.uniforms.uDevPalette.value = Math.max(0, PALETTES.indexOf(paletteQ));
+if (bundle.source === "real" && (paletteQ === "satellite" || paletteQ === "hybrid")) {
   new THREE.TextureLoader().load(
     `${import.meta.env.BASE_URL}data/satellite.jpg`,
-    (tex) => terrain.setSatellite(tex),
+    (tex) => (paletteQ === "hybrid" ? terrain.setSatelliteDetail(tex) : terrain.setSatellite(tex)),
     undefined,
-    () => console.info("[main] No satellite.jpg; using synthetic natural colors"),
+    () => {
+      console.info("[main] No satellite.jpg; using synthetic natural colors");
+      terrain.uniforms.uDevPalette.value = 0;
+      attribution = attribution.filter((a) => a !== ATTRIBUTION.image);
+      // 失败可能发生在界面创建之前（模块仍在等待资源）；那时下面创建界面后会用更新过的署名
+      try {
+        shell.setAttribution(attribution.join(". "));
+      } catch {
+        /* shell 尚未创建 */
+      }
+    },
   );
 }
 
@@ -72,7 +126,7 @@ ctx.scene.add(wires.object);
 // ---- 风与火 ----
 const simParams = {
   running: false,
-  stepsPerSecond: 20,
+  stepsPerSecond: 2,
   // Plan 默认情景：Norte Fire 当天中午的 HRRR 风
   windSpeed: NORTE_SCENARIO.windSpeed,
   windFrom: NORTE_SCENARIO.windFrom,
@@ -263,6 +317,23 @@ const shell = new Shell(
       refreshPanels();
     },
     onForecast: () => runForecast(),
+    onShowAlerts: (show) => homeAlerts.setVisible(show),
+    onShowMarkers: (show) => (markers.object.visible = show),
+    onCameraMode: (mode) => fly.setEnabled(mode === "fly"),
+    onNorth: () => {
+      // 转到正北：轨道模式绕旋转中心转到目标的正南方；飞行模式原地转向北方
+      const cam = ctx.camera.position;
+      if (fly.enabled) {
+        const dir = ctx.camera.getWorldDirection(new THREE.Vector3());
+        ctx.controls.target.copy(cam).addScaledVector(dir, 500);
+        const flat = Math.hypot(dir.x, dir.z);
+        rig.flyTo(cam.clone(), cam.clone().add(new THREE.Vector3(0, dir.y * 500, -flat * 500)));
+        return;
+      }
+      const t = ctx.controls.target;
+      const off = cam.clone().sub(t);
+      rig.flyTo(t.clone().add(new THREE.Vector3(0, off.y, Math.hypot(off.x, off.z))), t.clone());
+    },
     onShowForecast: (show) => {
       forecastShown = show;
       showForecast();
@@ -281,6 +352,13 @@ const shell = new Shell(
     elevRange: [terrain.minElev, terrain.maxElev],
   },
 );
+shell.setDamageLegend(damageCells.length > 0);
+shell.setAttribution(attribution.join(". "));
+// 指南针跟随相机朝向（0 为正北，顺时针）
+ctx.onFrame(() => {
+  const d = ctx.camera.getWorldDirection(new THREE.Vector3());
+  if (Math.hypot(d.x, d.z) > 1e-3) shell.setHeading((Math.atan2(d.x, -d.z) * 180) / Math.PI);
+});
 // 画布尺寸由 shell 的布局决定（侧栏、顶栏、底栏之外的区域）
 window.dispatchEvent(new Event("resize"));
 
@@ -295,13 +373,24 @@ window.dispatchEvent(new Event("resize"));
     if (grid.data[c * GRID_CHANNELS + 1] > 0.6) dense++;
   }
   const km2 = (n * meta.cellSize * meta.cellSize) / 1e6;
+  const share = (g: FuelGroup) => {
+    let k = 0;
+    for (let c = 0; c < n; c++) if (groups![c] === g && grid.data[c * GRID_CHANNELS + 3] === CellClass.Vegetation) k++;
+    return `${Math.round((k / Math.max(1, veg)) * 100)}% of vegetation`;
+  };
   shell.setOverview([
     ["Area", `${km2.toFixed(0)} km²`],
     ["Wildland vegetation", `${Math.round((veg / n) * 100)}%`],
-    ["Dense chaparral", `${Math.round((dense / Math.max(1, veg)) * 100)}% of vegetation`],
+    ...((groups
+      ? [
+          ["Cured grass", share(FuelGroup.Grass)],
+          ["Grass and sage scrub", share(FuelGroup.GrassShrub)],
+          ["Chaparral", share(FuelGroup.Shrub)],
+        ]
+      : [["Dense chaparral", `${Math.round((dense / Math.max(1, veg)) * 100)}% of vegetation`]]) as [string, string][]),
     ["Homes", bundle.buildings.length.toLocaleString("en-US")],
     ["Communities", String(bundle.communities.length)],
-    ["Data", bundle.source === "mock" ? "Synthetic test grid" : "Sentinel-2, USGS 3DEP and OSM"],
+    ["Data", bundle.source === "mock" ? "Synthetic test grid" : groups ? "LANDFIRE, Sentinel-2, USGS 3DEP and OSM" : "Sentinel-2, USGS 3DEP and OSM"],
   ]);
 }
 
@@ -314,6 +403,7 @@ const resetSim = () => {
   smoke.clear();
   monitor.reset();
   clearForecast();
+  refreshHomes();
   simParams.running = false;
   shell.setRunning(false);
 };
@@ -338,6 +428,8 @@ const applyNight = (v: number) => {
 function setMode(mode: Mode) {
   shell.setMode(mode);
   nightTarget = mode === "respond" ? 1 : 0;
+  terrain.showDamageArea(mode === "respond");
+  homeAlerts.setNight(mode === "respond");
   if (mode === "respond") terrain.layer = "natural";
   else terrain.layer = (document.getElementById("layer") as HTMLSelectElement).value as LayerId;
   if (reducedMotion) {
@@ -397,6 +489,121 @@ const realtime: RealtimeController = new RealtimeController({
   addIgnitions: (cells) => testIgnitions.push(...cells),
   onChange: () => refreshPanels(),
 });
+// ---- 房屋受损：冒泡提示与屋顶火苗 ----
+// 每栋房屋的锚点：屋顶上方 4 m；火苗站在屋顶上，尺寸取房屋水平尺寸
+const roofAnchors: THREE.Vector3[] = [];
+const roofSize: number[] = [];
+for (const p of layout.items) {
+  if (p.building === undefined) continue;
+  const box = lib[p.asset][p.variant].box;
+  const top = (p.elev - terrain.minElev) * terrain.verticalScale + box.max.y * p.scale;
+  roofAnchors[p.building] = new THREE.Vector3(p.x, top + 4, p.z);
+  roofSize[p.building] = Math.max(6, Math.max(box.max.x - box.min.x, box.max.z - box.min.z) * p.scale * 0.8);
+}
+bundle.buildings.forEach((b, i) => {
+  if (roofAnchors[i]) return;
+  const [x, y] = cellXY(meta, b.cell);
+  roofAnchors[i] = new THREE.Vector3((x - (meta.width - 1) / 2) * meta.cellSize, (grid.data[b.cell * GRID_CHANNELS] - terrain.minElev) * terrain.verticalScale + 10, (y - (meta.height - 1) / 2) * meta.cellSize);
+  roofSize[i] = 8;
+});
+const homeStatus = new HomeStatus(grid, bundle.buildings, roofAnchors, bundle.communities);
+/** 世界坐标 (x, z) 处的地面高度（显示坐标，已含竖向夸张） */
+const groundAt = (x: number, z: number) => {
+  const [gx, gy] = worldToGrid(meta, x, z);
+  return (sampleElevation(grid, gx, gy) - terrain.minElev) * terrain.verticalScale;
+};
+const houseFlames = new HouseFlames();
+ctx.scene.add(houseFlames.object);
+const describeHome = (a: HomeAlert): { title: string; rows: [string, string][] } => {
+  const rows: [string, string][] = [];
+  if (a.community) rows.push(["Community", a.community]);
+  if (a.state === "threat") {
+    if (a.etaMin !== undefined) rows.push(["Fire expected", a.etaMin < 5 ? "any minute" : `in about ${formatMinutes(Math.round(a.etaMin / 5) * 5)}`]);
+    if (a.distanceM !== undefined) rows.push(["Nearest fire", `${Math.round(a.distanceM / 10) * 10} m upwind`]);
+    if (a.chance !== undefined) rows.push(["Chance in 8 hours", `${Math.round(a.chance * 100)}%`]);
+  } else if (a.ignitedMin !== undefined) {
+    rows.push(["Ignited", `T + ${formatMinutes(a.ignitedMin)}, by embers`]);
+  }
+  rows.push(["Home hardening", a.hardened ? "Yes (Zone 0)" : "No"]);
+  const call = realtime.callStatus(bundle.buildings[a.id].id);
+  if (call) rows.push(["Resident call", call.replace(/_/g, " ")]);
+  rows.push(["Source", a.state === "threat" && a.chance !== undefined ? "64-run forecast" : "Simulation"]);
+  const titles = { burning: "Home on fire", burned: "Home destroyed", threat: "Home threatened" };
+  return { title: titles[a.state], rows };
+};
+const homeAlerts = new HomeAlerts(
+  ctx.camera,
+  ctx.renderer.domElement,
+  {
+    onHover: (title, rows, x, y) => shell.showHover(x, y, title, rows),
+    onLeave: () => shell.hideHover(),
+    onFly: (target, distance) => {
+      // 保持当前的观察方向，拉近到指定距离
+      const dir = ctx.camera.position.clone().sub(ctx.controls.target).normalize();
+      if (dir.y < 0.35) dir.setY(0.35).normalize();
+      rig.flyTo(target.clone().addScaledVector(dir, distance), target);
+    },
+  },
+  describeHome,
+  groundAt,
+  // 画面焦点：轨道模式下是旋转中心；飞行模式下取视线前方（典型观察距离处）的地面点
+  () => {
+    if (!fly.enabled) return ctx.controls.target;
+    const dir = ctx.camera.getWorldDirection(new THREE.Vector3());
+    const h = Math.max(50, ctx.camera.position.y - groundAt(ctx.camera.position.x, ctx.camera.position.z));
+    return ctx.camera.position.clone().addScaledVector(dir.setY(0).normalize(), h * 1.6);
+  },
+  (shown, total) => shell.setAlertCount(shown, total),
+);
+
+// ---- 相机：轨道模式（默认）与飞行模式（WASD，类似 Unity 编辑器） ----
+const fly = new FlyControls(
+  ctx.camera,
+  ctx.controls,
+  ctx.renderer.domElement,
+  groundAt,
+  () => {
+    const r = ctx.renderer.domElement.getBoundingClientRect();
+    return picker.pick(r.left + r.width / 2, r.top + r.height / 2)?.point ?? null;
+  },
+  (scale) => shell.setFlySpeed(scale),
+);
+ctx.onFrame((dt) => {
+  fly.update(dt);
+  if (fly.busy) rig.stop();
+});
+function refreshHomes() {
+  if (!simActive || !sim.lastState) {
+    homeStatus.reset();
+    homeAlerts.setItems([]);
+    houseFlames.set([]);
+    return;
+  }
+  const [ux, uy] = windToGrid(inflow());
+  const len = Math.hypot(ux, uy);
+  const alerts = homeStatus.update({
+    state: sim.lastState,
+    viewMinutes: viewMinutes ?? sim.minutes,
+    live: viewMinutes === null,
+    nowMinutes: sim.minutes,
+    stepMinutes: SpreadParams.stepMinutes,
+    forecast,
+    downwind: len > 0.5 ? [ux / len, uy / len] : null,
+    spreadRate: monitor.spreadRate,
+    treatMask: sim.treatMask,
+  });
+  homeAlerts.setItems(alerts);
+  houseFlames.set(
+    alerts
+      .filter((a) => a.state === "burning")
+      .map((a) => ({ position: a.anchor.clone().setY(a.anchor.y - 4), size: roofSize[a.id], seed: (a.id % 997) / 997 })),
+  );
+}
+ctx.onFrame((dt) => {
+  houseFlames.material.uniforms.uTime.value += dt;
+  homeAlerts.update();
+});
+
 let pending: PointerEvent | null = null;
 ctx.renderer.domElement.addEventListener("pointermove", (e) => (pending = e));
 ctx.renderer.domElement.addEventListener("pointerleave", () => {
@@ -408,6 +615,8 @@ const describe = (cell: number): string => {
   const cls = grid.data[cell * GRID_CHANNELS + 3];
   const fuel = grid.data[cell * GRID_CHANNELS + 1];
   if (cls === CellClass.Building) return "Neighborhood";
+  const named = bundle.fuelModel ? fuelModelName(bundle.fuelModel[cell]) : null;
+  if (named) return named;
   if (cls === CellClass.Unburnable) return "Road or stream";
   return fuel > 0.6 ? "Dense chaparral" : fuel > 0.3 ? "Chaparral and grass" : "Dry grass";
 };
@@ -442,7 +651,7 @@ let downAt: [number, number] | null = null;
 ctx.renderer.domElement.addEventListener("pointerdown", (e) => (downAt = [e.clientX, e.clientY]));
 ctx.renderer.domElement.addEventListener("pointerup", (e) => {
   // 点火只在 Plan 模式下可用；Respond 模式的火只来自实时数据或回放
-  if (!downAt || planner.isPainting || shell.mode === "respond") return;
+  if (!downAt || e.button !== 0 || planner.isPainting || shell.mode === "respond") return;
   const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
   downAt = null;
   if (moved > 4) return;
@@ -540,6 +749,7 @@ ctx.onFrame((dt) => {
 });
 
 function refreshPanels() {
+  refreshHomes();
   shell.setElapsed(simActive ? sim.minutes : null);
   shell.setViewAvailable(simActive && (sim.burningSample.length > 0 || testIgnitions.length > 0));
   shell.setTimeline(
@@ -574,8 +784,13 @@ function refreshPanels() {
       feedRows.push(["Pixels the model had reached", `${ag.reached} of ${ag.pixels} (${Math.round((ag.reached / ag.pixels) * 100)}%)`]);
       feedRows.push(["Model fire near a detection", `${Math.round(ag.confirmedShare * 100)}%`]);
     }
+    if (realtime.mode === "replay" && damageCells.length) {
+      let reached = 0;
+      if (sim.lastState) for (const c of damageCells) if (sim.lastState[c * 4] > 0.5) reached++;
+      feedRows.push(["Reported damage area, buildings the model reached", `${reached} of ${damageCells.length}`]);
+    }
     if (realtime.perimeter) {
-      feedRows.push(["Official perimeter", `${Math.round(realtime.perimeterHa).toLocaleString("en-US")} ha`]);
+      feedRows.push([realtime.perimeterLabel, `${Math.round(realtime.perimeterHa).toLocaleString("en-US")} ha`]);
       const iou = realtime.perimeterMatch(sim.lastState);
       if (iou !== null) feedRows.push(["Overlap with simulation", `${Math.round(iou * 100)}%`]);
     }
@@ -703,6 +918,10 @@ if (debug) {
   fSim.add({ check: () => runCpuCheck() }, "check").name("Check against CPU");
   fSim.add({ bench: () => runBench() }, "bench").name("Benchmark forecast (GPU vs CPU)");
   const smokeParams = { rate: smoke.rate, opacity: smoke.material.uniforms.uOpacity.value as number };
+  const fAlerts = gui.addFolder("Home alerts");
+  fAlerts.add(homeAlerts, "maxVisible", 5, 160, 1).name("Max bubbles");
+  fAlerts.add(homeAlerts, "rangeFactor", 1, 10, 0.5).name("Range × camera height");
+  fAlerts.add(homeAlerts, "minRange", 300, 5000, 100).name("Min range (m)");
   const fSmoke = gui.addFolder("Smoke");
   fSmoke.add(smokeParams, "rate", 20, 600, 10).name("Particles per second").onChange((v: number) => (smoke.rate = v));
   fSmoke.add(smokeParams, "opacity", 0.05, 0.8, 0.01).name("Opacity").onChange((v: number) => (smoke.material.uniforms.uOpacity.value = v));
@@ -785,4 +1004,4 @@ if (modeParam === "respond" || modeParam === "plan") {
 }
 
 // 调试用
-Object.assign(window, { bundle, ctx, terrain, props, layout, sim, smoke, monitor, shell, runCpuCheck, realtime, planner, ensemble, runForecast, runBench, getForecast: () => ({ forecast, outlook }) });
+Object.assign(window, { bundle, ctx, terrain, props, layout, sim, smoke, monitor, shell, runCpuCheck, realtime, planner, ensemble, runForecast, runBench, getForecast: () => ({ forecast, outlook }), homeStatus, homeAlerts, houseFlames, markers, fly });

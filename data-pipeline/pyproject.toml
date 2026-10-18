@@ -18,6 +18,11 @@ wildfire-source = "wildfire_grid.sources:main"
 wildfire-eaton-replay = "wildfire_grid.eaton:main"
 wildfire-norte-replay = "wildfire_grid.norte:main"
 wildfire-wind-library = "wildfire_grid.wind_library:main"
+wildfire-fuel = "wildfire_grid.fuels:main"
+wildfire-norte-perimeter = "wildfire_grid.perimeter:main"
+wildfire-norte-damage = "wildfire_grid.damage:main"
+wildfire-basemap = "wildfire_grid.basemap:main"
+wildfire-roads = "wildfire_grid.roads:main"
 
 [build-system]
 requires = ["setuptools>=69"]

@@ -16,6 +16,8 @@ export interface Placement {
   rot: number;
   scale: number;
   cell: number;
+  /** 建筑：对应 buildings 数组中的序号 */
+  building?: number;
 }
 
 export interface WireSpan {
@@ -222,7 +224,7 @@ export function layoutProps(grid: Grid, buildings: Building[], communities: Comm
     // 世界坐标中格子 y 对应 +z；绕 Y 轴旋转角 = -theta
     let rot = -theta + (modelLongIsX ? 0 : Math.PI / 2);
     if (hash(b.cell, 9) < 0.5) rot += Math.PI;
-    place(asset, center.x, center.y, hash(b.cell, 10), rot, s);
+    place(asset, center.x, center.y, hash(b.cell, 10), rot, s).building = i;
   });
 
   // ---- 电力：沿山地的一条输电线 ----

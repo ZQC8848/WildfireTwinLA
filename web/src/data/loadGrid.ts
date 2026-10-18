@@ -20,6 +20,18 @@ function normalizeFootprint(b: Building): Building {
   return { ...b, polygonLonLat: ring?.map(([lon, lat]) => [lon, lat] as [number, number]) };
 }
 
+/** 可选的 fuel-model.bin（每格 1 字节 FBFM40 代码）；不存在或长度不对时返回 undefined */
+async function loadFuelModel(cells: number): Promise<Uint8Array | undefined> {
+  try {
+    const res = await fetch(BASE + "fuel-model.bin");
+    if (!res.ok) return undefined;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    return bytes.length === cells ? bytes : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function loadGrid(): Promise<GridBundle> {
   const forceMock = new URLSearchParams(location.search).has("mock");
   if (!forceMock) {
@@ -30,11 +42,12 @@ export async function loadGrid(): Promise<GridBundle> {
       const data = new Float32Array(await res.arrayBuffer());
       const expected = meta.width * meta.height * GRID_CHANNELS;
       if (data.length !== expected) throw new Error(`grid.bin: length ${data.length}, expected ${expected}`);
-      const [buildings, communities] = await Promise.all([
+      const [buildings, communities, fuelModel] = await Promise.all([
         fetchJSON<Building[]>("buildings.json").catch(() => []),
         fetchJSON<Community[]>("communities.json").catch(() => []),
+        loadFuelModel(meta.width * meta.height),
       ]);
-      return { grid: { meta, data }, buildings: buildings.map(normalizeFootprint), communities, source: "real" };
+      return { grid: { meta, data }, buildings: buildings.map(normalizeFootprint), communities, source: "real", fuelModel };
     } catch (err) {
       console.info("[loadGrid] Falling back to synthetic grid:", (err as Error).message);
     }

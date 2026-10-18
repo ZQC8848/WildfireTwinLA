@@ -4,7 +4,7 @@ import hashlib
 import json
 import math
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from rasterio.transform import Affine, rowcol
@@ -14,9 +14,18 @@ NORTE_BBOX = (-117.714, 33.427, -117.576, 33.543)
 NORTE_IGNITION = datetime(2026, 10, 16, 18, 32, 56, tzinfo=UTC)
 MIRADA_IGNITION = datetime(2026, 10, 16, 19, 19, 54, tzinfo=UTC)
 LANDFILL = (33.4905, -117.6185)
-CAL_FIRE_URL = "https://www.fire.ca.gov/incidents/2026/10/16/norte-fire/"
-ORDER_TIME = datetime(2026, 10, 16, 19, 54, tzinfo=UTC)
+# The replay ends at 18:00 PDT: the last VIIRS detection was 21:48Z, wind dropped below
+# 4 m/s after 00:00Z and OCFA reported most of the fire knocked down by 17:45 PDT. The
+# simulator has no suppression, so running it longer only grows an unopposed fire.
+REPLAY_END = datetime(2026, 10, 17, 1, 0, tzinfo=UTC)
+# No public source gives the issue time of the orders. News coverage shows them in place by
+# about 12:30 PDT, so the events sit there and are flagged as approximate.
+ORDER_TIME = datetime(2026, 10, 16, 19, 30, tzinfo=UTC)
 ORDER_ZONES = ("SCL12", "SCL13", "SJC04", "SJC05", "SJC10")
+ORDER_SOURCES = (
+    "https://www.cbsnews.com/losangeles/news/norte-fire-san-clemente-orange-county-fire-authority/",
+    "https://ktla.com/news/orange-county/norte-fire-threatening-structures-san-clemente/",
+)
 
 
 def _distance_m(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> float:
@@ -62,8 +71,9 @@ def _hotspot_item(
     confidence: float,
     frp: float,
     grid: dict | None,
+    satellite: str | None = None,
 ) -> dict:
-    return {
+    item = {
         "id": item_id,
         "cell": _grid_cell(grid, lon, lat),
         "lon": lon,
@@ -73,6 +83,9 @@ def _hotspot_item(
         "conf": confidence,
         "source": source,
     }
+    if satellite:
+        item["satellite"] = satellite
+    return item
 
 
 def _report_events(grid: dict | None) -> list[dict]:
@@ -122,8 +135,10 @@ def _wind_events(path: Path) -> list[dict]:
     events = []
     for index, raw_time in enumerate(times):
         when = datetime.fromisoformat(raw_time).replace(tzinfo=UTC)
-        if when < NORTE_IGNITION:
+        # The hour containing the ignition is sent at the ignition time
+        if when + timedelta(hours=1) <= NORTE_IGNITION or when > REPLAY_END:
             continue
+        when = max(when, NORTE_IGNITION)
         samples = [
             {
                 "speedMs": point["hourly"]["wind_speed_10m"][index],
@@ -159,6 +174,7 @@ def _viirs_events(paths: list[Path], grid: dict | None) -> list[dict]:
                 ).replace(tzinfo=UTC)
                 if (
                     when < NORTE_IGNITION
+                    or when > REPLAY_END
                     or not (west <= lon <= east and south <= lat <= north)
                     or _distance_m(lat, lon, *LANDFILL) <= 750
                 ):
@@ -178,6 +194,7 @@ def _viirs_events(paths: list[Path], grid: dict | None) -> list[dict]:
                         confidence=_confidence(row.get("confidence", "")),
                         frp=max(0, float(row.get("frp") or 0)),
                         grid=grid,
+                        satellite=row.get("satellite") or None,
                     )
                 )
     return [
@@ -201,10 +218,15 @@ def _order_events() -> list[dict]:
             "id": f"norte-order-{zone.lower()}",
             "communityId": zone.lower(),
             "level": "order",
-            "headline": f"Evacuation order for {zone}",
-            "source": "CAL FIRE / Orange County Fire Authority",
-            "sourceUrl": CAL_FIRE_URL,
-            "issuedAt": emitted,
+            "headline": (
+                f"Evacuation order for {zone}. In place by early afternoon; "
+                "the exact issue time was not published"
+            ),
+            "source": "Orange County Fire Authority, as reported by CBS Los Angeles and KTLA",
+            "sourceUrl": ORDER_SOURCES[0],
+            "sourceUrls": list(ORDER_SOURCES),
+            "issuedAt": None,
+            "timeApproximate": True,
             "expiresAt": None,
             "official": True,
         }
@@ -212,7 +234,36 @@ def _order_events() -> list[dict]:
     ]
 
 
-def build_events(raw_dir: Path, grid: dict | None = None) -> list[dict]:
+def _perimeter_event(path: Path | None) -> list[dict]:
+    """Final incident event from `wildfire-norte-perimeter`, sent at the end of the replay.
+
+    The perimeter's own observation time is kept in `observedAt`. It describes the final
+    extent, and the fire was knocked down by the end of the replay window.
+    """
+    if not path or not path.exists():
+        return []
+    perimeter = json.loads(path.read_text())
+    emitted = REPLAY_END.isoformat().replace("+00:00", "Z")
+    return [
+        {
+            "offsetSeconds": _offset(REPLAY_END),
+            "type": "incident",
+            "emittedAt": emitted,
+            "id": "norte-2026",
+            "latestAt": emitted,
+            "perimeterCells": perimeter["cells"],
+            "perimeterSource": perimeter["source"],
+            "perimeterLabel": perimeter["label"],
+            "perimeterOfficial": perimeter["official"],
+            "perimeterMethod": perimeter.get("method"),
+            "observedAt": perimeter.get("observedAt"),
+        }
+    ]
+
+
+def build_events(
+    raw_dir: Path, grid: dict | None = None, perimeter: Path | None = None
+) -> list[dict]:
     events = [
         {
             "offsetSeconds": 0,
@@ -229,6 +280,7 @@ def build_events(raw_dir: Path, grid: dict | None = None) -> list[dict]:
     events.extend(_wind_events(raw_dir / "hrrr_5x5_2026-10-15_17.json"))
     events.extend(_viirs_events(sorted(raw_dir.glob("firms_viirs_*_48h_2026-10-17.csv")), grid))
     events.extend(_order_events())
+    events.extend(_perimeter_event(perimeter))
     priority = {"snapshot": 0, "wind": 1, "hotspots": 2, "incident": 3, "official_order": 4}
     events.sort(key=lambda event: (event["offsetSeconds"], priority[event["type"]]))
     for sequence, event in enumerate(events):
@@ -241,9 +293,14 @@ def main() -> None:
     parser.add_argument("--raw-dir", default="../data/norte/raw")
     parser.add_argument("--grid", help="Optional grid.json used to populate hotspot cell IDs")
     parser.add_argument("--output", default="../server/data/norte-replay.jsonl")
+    parser.add_argument(
+        "--perimeter",
+        default="../data/norte/perimeter.json",
+        help="Output of wildfire-norte-perimeter; skipped when the file does not exist",
+    )
     args = parser.parse_args()
     grid = json.loads(Path(args.grid).read_text()) if args.grid else None
-    events = build_events(Path(args.raw_dir), grid)
+    events = build_events(Path(args.raw_dir), grid, Path(args.perimeter))
     Path(args.output).write_text("\n".join(json.dumps(event) for event in events) + "\n")
 
 

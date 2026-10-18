@@ -1,6 +1,7 @@
 import argparse
 import json
 import re
+import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -60,19 +61,38 @@ def fetch_buildings(bbox: tuple[float, float, float, float]) -> dict:
 
 
 def _fetch_overpass(query: str) -> dict:
+    return overpass_to_geojson(fetch_overpass_raw(query))
+
+
+def fetch_overpass_raw(query: str, rounds: int = 4) -> dict:
+    """Overpass JSON from the first endpoint that answers.
+
+    The public servers often reject requests at capacity; they ask clients to retry with
+    exponential backoff, so each round waits 15, 30, 60 s before trying all endpoints again.
+    """
     last_error: Exception | None = None
-    for url in OVERPASS_URLS:
-        request = Request(
-            url,
-            data=urlencode({"data": query}).encode(),
-            headers={"User-Agent": "WildfireTwinLA/0.1"},
-        )
-        try:
-            with urlopen(request, timeout=180) as response:
-                return overpass_to_geojson(json.load(response))
-        except (HTTPError, URLError, TimeoutError) as error:
-            last_error = error
+    for attempt in range(rounds):
+        if attempt:
+            time.sleep(15 * 2 ** (attempt - 1))
+        for url in OVERPASS_URLS:
+            result = _try_overpass(url, query)
+            if isinstance(result, dict):
+                return result
+            last_error = result
     raise RuntimeError("all Overpass endpoints failed") from last_error
+
+
+def _try_overpass(url: str, query: str) -> dict | Exception:
+    request = Request(
+        url,
+        data=urlencode({"data": query}).encode(),
+        headers={"User-Agent": "WildfireTwinLA/0.1"},
+    )
+    try:
+        with urlopen(request, timeout=180) as response:
+            return json.load(response)
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as error:
+        return error
 
 
 def fetch_dem(bbox: tuple[float, float, float, float]) -> tuple[bytes, str]:
@@ -97,6 +117,51 @@ def fetch_dem(bbox: tuple[float, float, float, float]) -> tuple[bytes, str]:
         return response.read(), url
 
 
+LANDFIRE_IMAGE_SERVICES = "https://lfps.usgs.gov/arcgis/rest/services"
+
+
+def fetch_fbfm40(
+    bbox: tuple[float, float, float, float],
+    layer: str = "FA26",
+    crs: str = "EPSG:32611",
+    cell_size: float = 30.0,
+    margin_m: float = 500.0,
+) -> tuple[bytes, str]:
+    """LANDFIRE FBFM40 GeoTIFF covering the bbox, exported at its native 30 m in the grid CRS.
+
+    `layer` is a key of fuels.LANDFIRE_FBFM40_LAYERS. FA26 is the fall 2026 seasonal fuel
+    model, matching an October fire. The grid build resamples it with nearest neighbour.
+    """
+    from rasterio.warp import transform_bounds
+
+    from .fuels import LANDFIRE_FBFM40_LAYERS
+
+    left, bottom, right, top = transform_bounds("EPSG:4326", crs, *bbox)
+    left, bottom, right, top = left - margin_m, bottom - margin_m, right + margin_m, top + margin_m
+    width = round((right - left) / cell_size)
+    height = round((top - bottom) / cell_size)
+    epsg = crs.split(":")[1]
+    params = urlencode(
+        {
+            "bbox": f"{left},{bottom},{left + width * cell_size},{bottom + height * cell_size}",
+            "bboxSR": epsg,
+            "imageSR": epsg,
+            "size": f"{width},{height}",
+            "format": "tiff",
+            "pixelType": "U8",
+            "interpolation": "RSP_NearestNeighbor",
+            "noData": 0,
+            "f": "image",
+        }
+    )
+    url = f"{LANDFIRE_IMAGE_SERVICES}/{LANDFIRE_FBFM40_LAYERS[layer]}/ImageServer/exportImage?{params}"
+    with urlopen(url, timeout=120) as response:
+        content = response.read()
+    if not content.startswith((b"II*\x00", b"MM\x00*")):
+        raise RuntimeError(f"LANDFIRE did not return a GeoTIFF: {content[:200]!r}")
+    return content, url
+
+
 def _dem_sort_key(item: dict) -> tuple[str, str]:
     title = str(item.get("title") or "")
     dates = re.findall(r"\b(20\d{6})\b", title)
@@ -108,7 +173,10 @@ def _dem_sort_key(item: dict) -> tuple[str, str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Download source data for the grid pipeline")
-    parser.add_argument("kind", choices=("buildings", "dem"))
+    parser.add_argument("kind", choices=("buildings", "dem", "fbfm40"))
+    parser.add_argument(
+        "--layer", default="FA26", help="FBFM40 layer: FA26 (fall 2026), SU26, SP26, ES26, LF2025"
+    )
     parser.add_argument(
         "--bbox", required=True, type=lambda value: tuple(map(float, value.split(",")))
     )
@@ -120,7 +188,9 @@ def main() -> None:
     if args.kind == "buildings":
         output.write_text(json.dumps(fetch_buildings(args.bbox)) + "\n")
     else:
-        content, source_url = fetch_dem(args.bbox)
+        content, source_url = (
+            fetch_dem(args.bbox) if args.kind == "dem" else fetch_fbfm40(args.bbox, args.layer)
+        )
         output.write_bytes(content)
         output.with_suffix(output.suffix + ".source.json").write_text(
             json.dumps({"source": source_url}, indent=2) + "\n"

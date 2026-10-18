@@ -1,0 +1,3 @@
+{
+  "source": "https://lfps.usgs.gov/arcgis/rest/services/Landfire_LF2025_Seasonal_Fuels_2026/LF2025_FBFM40_FA26/ImageServer/exportImage?bbox=433123.54845999257%2C3698274.104559064%2C447013.54845999257%2C3712224.104559064&bboxSR=32611&imageSR=32611&size=463%2C465&format=tiff&pixelType=U8&interpolation=RSP_NearestNeighbor&noData=0&f=image"
+}
