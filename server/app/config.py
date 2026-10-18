@@ -32,6 +32,23 @@ class Settings(BaseSettings):
     replay_path: str = "./data/norte-replay.jsonl"
     eaton_replay_path: str = "./data/eaton-replay.jsonl"
     registration_rate_limit: int = 10
+    # Browser origins allowed to call the HTTP API (the WebSocket is not subject to CORS)
+    cors_origins: tuple[str, ...] = ("http://localhost:5173", "http://127.0.0.1:5173")
+    # Emergency contact dispatcher (app/dispatch.py)
+    grid_dir: str = "../web/public/data"
+    dispatch_call_lines: int = 6
+    dispatch_sms_per_second: float = 25.0
+    dispatch_demo_speed: float = 10.0
+    # Only with this switch on, a home whose building has a consented, registered resident is
+    # called through Retell. Synthetic households are never dialled.
+    dispatch_real_calls: bool = False
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_origins(cls, value: object) -> object:
+        if isinstance(value, str):
+            return tuple(part.strip() for part in value.split(",") if part.strip())
+        return value
 
     @field_validator("bbox", mode="before")
     @classmethod

@@ -13,11 +13,20 @@ def load_replay(path: str) -> list[dict]:
     return sorted(events, key=lambda event: float(event.get("offsetSeconds", 0)))
 
 
-async def stream_replay(websocket: WebSocket, path: str, speed: float = 20) -> None:
+async def stream_replay(
+    websocket: WebSocket, path: str, speed: float = 20, start: float = 0
+) -> None:
+    """Send events paced by offsetSeconds / speed.
+
+    A client that changes speed mid-replay reconnects with `start`, the offset of the last event
+    it received; events at or before it are skipped.
+    """
     events = load_replay(path)
-    previous = 0.0
+    previous = start
     for event in events:
         offset = float(event.pop("offsetSeconds", 0))
+        if start > 0 and offset <= start + 0.0005:
+            continue
         await asyncio.sleep(max(0, offset - previous) / max(speed, 0.1))
         await websocket.send_json(event)
         previous = offset

@@ -7,7 +7,10 @@ wildland dirt roads are a few metres wide, far narrower than a 25 m cell.
 Output:
 
     {"classes": ["motorway", "major", "minor", "street", "track"],
-     "roads": [[classIndex, x0, y0, x1, y1, ...], ...]}
+     "roads": [[classIndex, x0, y0, x1, y1, ...], ...],
+     "names": [name or null for each road]}
+
+The names are used by the server to give the synthetic households a street address.
 
 x and y are in grid-cell units measured from the north-west corner of the grid (x east, y south),
 so cell (c, r) spans [c, c + 1) x [r, r + 1).
@@ -52,6 +55,7 @@ def fetch_roads(bbox: tuple[float, float, float, float]) -> list[dict]:
     return [
         {
             "class": HIGHWAY_CLASS[way["tags"]["highway"]],
+            "name": way["tags"].get("name"),
             "coords": [(p["lon"], p["lat"]) for p in way["geometry"]],
         }
         for way in payload.get("elements", [])
@@ -89,6 +93,7 @@ def main() -> None:
         "classes": list(CLASSES),
         "source": "OpenStreetMap contributors (ODbL)",
         "roads": to_grid(meta, roads),
+        "names": [road["name"] for road in roads],
     }
     (grid_dir / "roads.json").write_text(json.dumps(payload, separators=(",", ":")) + "\n")
     counts = {name: sum(1 for r in roads if r["class"] == i) for i, name in enumerate(CLASSES)}

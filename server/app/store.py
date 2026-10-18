@@ -358,6 +358,18 @@ class Store:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def resident_for_building(self, building_id: str) -> dict | None:
+        """The consented, active resident registered for a building, if any."""
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM residents WHERE building_id=? AND revoked_at IS NULL
+                ORDER BY consent_at DESC LIMIT 1
+                """,
+                (building_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
     def revoke_resident(self, resident_id: str, revoke_token: str) -> bool:
         token_hash = hashlib.sha256(revoke_token.encode()).hexdigest()
         with self.connect() as connection:

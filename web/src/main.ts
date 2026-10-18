@@ -36,6 +36,8 @@ import { HomeAlerts } from "./ui/homeAlerts";
 import { HouseFlames } from "./scene/houseFlames";
 import { FlyControls } from "./scene/flyControls";
 import { sampleElevation, worldToGrid } from "./scene/coords";
+import { ContactCode, DispatchClient, type ContactTask } from "./net/dispatch";
+import type { ContactTaskView } from "./ui/shell";
 import { ENSEMBLE_FACTOR, ENSEMBLE_MEMBERS, Ensemble, communityOutlook, type CommunityOutlook, type EnsembleResult } from "./sim/ensemble";
 
 const q = new URLSearchParams(location.search);
@@ -297,7 +299,7 @@ const shell = new Shell(
     onBudget: (v) => planner.setBudget(v),
     onSuggest: () => planner.suggest(),
     onShowPlan: (key) => planner.show(key),
-    onFeed: (mode) => realtime.start(mode),
+    onFeed: (mode) => startFeed(mode),
     onShowSmoke: (show) => {
       smokeEnabled = show;
       smoke.object.visible = show && viewMinutes === null;
@@ -319,6 +321,15 @@ const shell = new Shell(
     onForecast: () => runForecast(),
     onShowAlerts: (show) => homeAlerts.setVisible(show),
     onShowMarkers: (show) => (markers.object.visible = show),
+    onShowContact: (show) => terrain.showContact(show),
+    onContactToggle: () => {
+      if (dispatch.state === "active" || dispatch.state === "starting") {
+        contactStoppedByUser = true;
+        void dispatch.stop();
+      } else void startContact();
+    },
+    onContactFocus: (buildingId) => focusHome(buildingId),
+    onContactRefresh: () => renderContact(),
     onCameraMode: (mode) => fly.setEnabled(mode === "fly"),
     onNorth: () => {
       // 转到正北：轨道模式绕旋转中心转到目标的正南方；飞行模式原地转向北方
@@ -404,6 +415,8 @@ const resetSim = () => {
   monitor.reset();
   clearForecast();
   refreshHomes();
+  contactStoppedByUser = false;
+  if (dispatch.state !== "off") void dispatch.stop();
   simParams.running = false;
   shell.setRunning(false);
 };
@@ -528,7 +541,13 @@ const describeHome = (a: HomeAlert): { title: string; rows: [string, string][] }
   const call = realtime.callStatus(bundle.buildings[a.id].id);
   if (call) rows.push(["Resident call", call.replace(/_/g, " ")]);
   rows.push(["Source", a.state === "threat" && a.chance !== undefined ? "64-run forecast" : "Simulation"]);
-  const titles = { burning: "Home on fire", burned: "Home destroyed", threat: "Home threatened" };
+  const titles = { burning: "Home on fire", burned: "Home destroyed", threat: "Home threatened", calling: "Calling this home", help: "Resident needs help" };
+  const task = dispatch.tasks.get(`call-hh-${bundle.buildings[a.id].id}`);
+  if (task) {
+    // 紧急联络：只有打码后的住户信息（模拟数据）
+    rows.unshift(["Resident", task.household.owner], ["Phone", task.household.phone], ["Address", task.household.address]);
+    rows.push(["Call", CALL_LABELS[task.status] ?? task.status]);
+  }
   return { title: titles[a.state], rows };
 };
 const homeAlerts = new HomeAlerts(
@@ -591,6 +610,7 @@ function refreshHomes() {
     downwind: len > 0.5 ? [ux / len, uy / len] : null,
     spreadRate: monitor.spreadRate,
     treatMask: sim.treatMask,
+    contacts: contactBubbles(),
   });
   homeAlerts.setItems(alerts);
   houseFlames.set(
@@ -602,6 +622,119 @@ function refreshHomes() {
 ctx.onFrame((dt) => {
   houseFlames.material.uniforms.uTime.value += dt;
   homeAlerts.update();
+});
+
+// ---- 紧急联络（后端调度器，net/dispatch.ts）：起火后优先外呼最近的房屋，并给附近所有住户发短信 ----
+const CALL_LABELS: Record<string, string> = {
+  queued: "Waiting in the call queue",
+  ringing: "Ringing",
+  talking: "On the call",
+  confirmed: "Confirmed safe",
+  needs_help: "Asked for help",
+  no_answer: "No answer, texted instead",
+  failed: "Call failed, texted instead",
+};
+/** 回放在调度开始后的倍速：每秒 5 分钟，把舞台交给外呼流水线 */
+const CONTACT_REPLAY_SPEED = 1;
+const buildingIndex = new Map(bundle.buildings.map((b, i) => [b.id, i]));
+let contactDirty = true;
+let contactStoppedByUser = false;
+const dispatch = new DispatchClient(() => (contactDirty = true));
+
+function contactBubbles(): Map<string, "calling" | "help"> {
+  const out = new Map<string, "calling" | "help">();
+  for (const [id, code] of dispatch.codes) {
+    if (code === ContactCode.Calling) out.set(id, "calling");
+    else if (code === ContactCode.NeedsHelp) out.set(id, "help");
+  }
+  return out;
+}
+
+// 地图状态点：同一格有多栋房屋时显示最紧急的状态
+const CONTACT_RANK: Record<number, number> = { 7: 7, 4: 6, 3: 5, 6: 4, 5: 3, 2: 2, 1: 1 };
+const contactCodes = new Uint8Array(meta.width * meta.height);
+function refreshContactLayer() {
+  contactCodes.fill(0);
+  for (const [id, code] of dispatch.codes) {
+    const i = buildingIndex.get(id);
+    if (i === undefined) continue;
+    const cell = bundle.buildings[i].cell;
+    if ((CONTACT_RANK[code] ?? 0) > (CONTACT_RANK[contactCodes[cell]] ?? 0)) contactCodes[cell] = code;
+  }
+  terrain.setContactCodes(dispatch.codes.size ? contactCodes : null);
+}
+
+function contactView(t: ContactTask): ContactTaskView {
+  const h = t.household;
+  const speed = dispatch.summary?.demoSpeed ?? 1;
+  return {
+    buildingId: h.buildingId,
+    owner: h.owner,
+    phone: h.phone,
+    address: h.address,
+    vulnerable: h.vulnerable,
+    status: t.status,
+    etaMin: t.etaMin,
+    elapsedS: Math.max(0, (Date.now() / 1000 - t.updatedAt) * speed),
+  };
+}
+
+function renderContact() {
+  const callQueue = dispatch.queue("call");
+  const textQueue = dispatch.queue("text");
+  shell.setContact({
+    state: dispatch.state,
+    summary: dispatch.summary,
+    calling: dispatch.calling().map(contactView),
+    help: dispatch.needsHelp().slice(0, 6).map(contactView),
+    queue: { call: callQueue.slice(0, 8).map(contactView), text: textQueue.slice(0, 8).map(contactView) },
+    queueTotals: { call: callQueue.length, text: textQueue.length },
+  });
+}
+
+function focusHome(buildingId: string) {
+  const i = buildingIndex.get(buildingId);
+  if (i === undefined) return;
+  const target = roofAnchors[i];
+  const dir = ctx.camera.position.clone().sub(ctx.controls.target).normalize();
+  if (dir.y < 0.35) dir.setY(0.35).normalize();
+  rig.flyTo(target.clone().addScaledVector(dir, 280), target.clone());
+}
+
+/** 接入数据源。回放的第一条事件就是起火，所以紧急联络开启时回放从一开始就用慢速 */
+function startFeed(mode: "off" | "live" | "replay") {
+  realtime.start(mode, contactStoppedByUser ? undefined : CONTACT_REPLAY_SPEED);
+}
+
+async function startContact() {
+  contactStoppedByUser = false;
+  // 起火时立即给回放减速（不等后端响应），让观众看清外呼队列的推进
+  if (realtime.mode === "replay") realtime.setReplaySpeed(CONTACT_REPLAY_SPEED);
+  await dispatch.start();
+}
+
+// 每 1.5 秒上报一次燃烧格与模型到达时间；面板与状态点在状态变化后最多每 0.25 秒刷新一次
+let firePushTimer = 0;
+let contactRenderTimer = 0;
+ctx.onFrame((dt) => {
+  firePushTimer += dt;
+  if (firePushTimer >= 1.5 && dispatch.state === "active" && simActive && sim.burningSample.length) {
+    firePushTimer = 0;
+    const etas: Record<string, number> = {};
+    for (const a of homeStatus.alerts) {
+      const id = bundle.buildings[a.id].id;
+      if (a.state === "burning") etas[id] = 0;
+      else if (a.etaMin !== undefined) etas[id] = a.etaMin;
+    }
+    void dispatch.pushFire(sim.burningSample, etas, simParams.windFrom, simParams.windSpeed);
+  }
+  contactRenderTimer += dt;
+  if (contactRenderTimer >= 0.25 && (contactDirty || dispatch.calling().length)) {
+    contactRenderTimer = 0;
+    if (contactDirty) refreshContactLayer();
+    contactDirty = false;
+    renderContact();
+  }
 });
 
 let pending: PointerEvent | null = null;
@@ -762,6 +895,8 @@ function refreshPanels() {
   const fs = simActive ? sim.stats() : null;
   // 预报：有火时可以运行；显示中且模拟已推进一小时以上时自动重算
   const fireNow = !!fs && fs.burningCells > 0;
+  // 紧急联络：Respond 中出现火情时自动启动（用户手动停止后不再自动启动，直到重置）
+  if (fireNow && shell.mode === "respond" && dispatch.state === "off" && !contactStoppedByUser) void startContact();
   if (forecast && forecastShown && fireNow && viewMinutes === null && sim.minutes - forecast.startMinutes >= FORECAST_REFRESH_MIN) runForecast();
   else shell.setForecast(fireNow, null, outlook);
   shell.setPlanFire(
@@ -796,7 +931,6 @@ function refreshPanels() {
     }
   }
   shell.setFeed(realtime.mode, realtime.status, feedRows, realtime.bundledReplay);
-  shell.setCalls(realtime.callTally());
   shell.setRespond(simActive ? monitor.closest() : null, monitor.communities, { affected: monitor.homesAffected, total: monitor.totalHomes }, monitor.events);
   if (debug) {
     const st = props.stats();
@@ -995,7 +1129,7 @@ if (q.has("cpucheck")) runCpuCheck(Number(q.get("cpucheck")) || 80);
 if (q.has("forecast")) runForecast();
 if (q.has("bench")) Object.assign(window, { benchResult: runBench(Number(q.get("bench")) || 4) });
 const feedQ = q.get("feed");
-if (feedQ === "live" || feedQ === "replay") realtime.start(feedQ);
+if (feedQ === "live" || feedQ === "replay") startFeed(feedQ);
 const modeParam = q.get("mode");
 if (modeParam === "respond" || modeParam === "plan") {
   setMode(modeParam);
@@ -1004,4 +1138,4 @@ if (modeParam === "respond" || modeParam === "plan") {
 }
 
 // 调试用
-Object.assign(window, { bundle, ctx, terrain, props, layout, sim, smoke, monitor, shell, runCpuCheck, realtime, planner, ensemble, runForecast, runBench, getForecast: () => ({ forecast, outlook }), homeStatus, homeAlerts, houseFlames, markers, fly });
+Object.assign(window, { bundle, ctx, terrain, props, layout, sim, smoke, monitor, shell, runCpuCheck, realtime, planner, ensemble, runForecast, runBench, getForecast: () => ({ forecast, outlook }), homeStatus, homeAlerts, houseFlames, markers, fly, dispatch });

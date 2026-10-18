@@ -81,6 +81,8 @@ uniform bool uHasTreat;
 uniform vec3 uRetardant;
 uniform sampler2D uPerimeter; // 官方火界（R > 0 为火界内），只画轮廓作为对照
 uniform bool uHasPerimeter;
+uniform sampler2D uContact; // 紧急联络状态（每格 R × 255 = ContactCode，见 net/dispatch.ts）
+uniform bool uHasContact;
 uniform sampler2D uDamage; // 报告受损区域（R > 0 为区域内），只画虚线轮廓作为对照
 uniform bool uHasDamage;
 uniform sampler2D uForecast; // 集合预报统计（降采样网格）：R 燃烧概率，B 中位数着火时刻（距预报起点的分钟，-1 为未过半）
@@ -471,6 +473,30 @@ void main() {
     col = mix(col, vec3(0.98, 0.92, 0.84), line * 0.6);
   }
 
+  // 紧急联络状态点：每个房屋格中心一个点，形状与颜色按状态区分（Retardant 粉红系，人的干预）。
+  // 点的屏幕半径至少约 2 像素，远处也看得见；外呼中的点脉动并超过 1 的亮度，经 Bloom 发光
+  if (uHasContact) {
+    ivec2 cc = ivec2(floor(vCell + 0.5));
+    int code = int(texelFetch(uContact, clamp(cc, ivec2(0), ivec2(uGridSize) - 1), 0).r * 255.0 + 0.5);
+    if (code > 0) {
+      float px = max(fwidth(vCell.x), fwidth(vCell.y));
+      float r = code == 7 ? 0.44 : code >= 3 ? 0.36 : 0.24;
+      r = max(r, 2.2 * px);
+      float dist = length(vCell - vec2(cc));
+      float disc = 1.0 - smoothstep(r - px, r + px, dist);
+      float ring = disc * smoothstep(r * 0.55 - px, r * 0.55 + px, dist);
+      float core = 1.0 - smoothstep(r * 0.32 - px, r * 0.32 + px, dist);
+      vec3 pink = uRetardant;
+      if (code == 1) col = mix(col, vec3(0.74, 0.71, 0.66), ring * 0.9);          // 短信排队：灰色空心
+      else if (code == 2) col = mix(col, vec3(0.94, 0.68, 0.8), disc * 0.95);     // 已发短信：浅粉实心
+      else if (code == 3) col = mix(col, pink, ring);                              // 外呼排队：粉红空心
+      else if (code == 4) col = mix(col, pink * (1.1 + 0.7 * (0.5 + 0.5 * sin(uTime * 7.0))), disc); // 外呼中：脉动
+      else if (code == 5) col = mix(mix(col, pink, disc), vec3(1.0), core * disc); // 已确认安全：粉红点 + 白心
+      else if (code == 6) col = mix(col, pink * 0.55, ring);                       // 未接通：暗粉空心
+      else if (code == 7) col = mix(mix(col, vec3(1.0), disc), pink, ring);        // 需要帮助：白底粉边
+    }
+  }
+
   // 悬停格子描边
   vec2 d = abs(vCell - uHover);
   float m = max(d.x, d.y);
@@ -556,6 +582,8 @@ export class Terrain {
           uRetardant: { value: new THREE.Color("#D63A73") },
           uPerimeter: { value: null },
           uHasPerimeter: { value: false },
+          uContact: { value: null },
+          uHasContact: { value: false },
           uDamage: { value: null },
           uHasDamage: { value: false },
           uForecast: { value: null },
@@ -676,6 +704,32 @@ export class Terrain {
     tex.magFilter = THREE.NearestFilter;
     tex.needsUpdate = true;
     this.uniforms.uDamage.value = tex;
+  }
+
+  private contactTex: THREE.DataTexture | null = null;
+  private contactShown = true;
+
+  /** 紧急联络状态（每格一个 ContactCode）；传 null 清除 */
+  setContactCodes(codes: Uint8Array | null) {
+    if (!codes) {
+      this.uniforms.uHasContact.value = false;
+      return;
+    }
+    const { width: W, height: H } = this.grid.meta;
+    if (!this.contactTex) {
+      this.contactTex = new THREE.DataTexture(new Uint8Array(W * H), W, H, THREE.RedFormat, THREE.UnsignedByteType);
+      this.contactTex.minFilter = THREE.NearestFilter;
+      this.contactTex.magFilter = THREE.NearestFilter;
+      this.uniforms.uContact.value = this.contactTex;
+    }
+    (this.contactTex.image.data as Uint8Array).set(codes);
+    this.contactTex.needsUpdate = true;
+    this.uniforms.uHasContact.value = this.contactShown;
+  }
+
+  showContact(show: boolean) {
+    this.contactShown = show;
+    this.uniforms.uHasContact.value = show && !!this.contactTex;
   }
 
   /** 显示或隐藏报告受损区域（只在 Respond 模式显示） */
