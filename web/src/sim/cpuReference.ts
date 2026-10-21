@@ -97,8 +97,11 @@ export class CpuFireSim {
         }
         if (cls < 0.5) continue;
         const M = treatmentMultipliers();
-        const treat = this.opts.mask ? this.opts.mask[c] : 0;
+        const mask = this.opts.mask;
+        const treat = mask ? mask[c] : 0;
         const treatMul = treat === 1 ? M.break : treat === 2 ? M.burn : treat === 3 ? M.thin : 1;
+        // 燃烧格剩下的燃料：防火带、计划烧除里的燃烧格向外蔓延和放出飞火都按剩余燃料打折
+        const fuelLeft = (n: number) => (!mask ? 1 : mask[n] === 1 ? M.break : mask[n] === 2 ? M.burn : 1);
         const vx = this.wind[c * 2];
         const vy = this.wind[c * 2 + 1];
         const V = Math.hypot(vx, vy);
@@ -123,19 +126,22 @@ export class CpuFireSim {
               const pw = Math.exp(P.c1 * V) * Math.exp(P.c2 * V * (cosT - 1));
               const slope = (Math.atan2(elev - g[n * 4], dist) * 180) / Math.PI;
               const ps = Math.exp(P.a * slope);
-              const p = Math.min(1, Math.max(0, base * pw * ps * (diag ? 0.83 : 1) * treatMul));
+              const p = Math.min(1, Math.max(0, base * pw * ps * (diag ? 0.83 : 1) * treatMul * fuelLeft(n)));
               notIgnite *= 1 - p;
             }
         }
         if (this.opts.spotting && V > 2) {
           const meanDist = P.spot.distMeanPerWindMs * V;
+          const longShare = P.spot.longShare * Math.min(1, Math.max(0, (V - 5) / 5));
           const sus = (cls > 1.5 ? 2.5 * (0.5 + dry) * (treat === 4 ? M.zone0 : 1) : fuel * (0.5 + dry)) * treatMul;
           for (let k = 0; k < Math.min(8, P.spot.samples); k++) {
             const u1 = Math.max(rand(x, y, this.step, seed, 10 + k * 3), 1e-6);
             const u2 = rand(x, y, this.step, seed, 11 + k * 3);
             const u3 = rand(x, y, this.step, seed, 12 + k * 3);
             const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-            const d = meanDist * Math.exp(0.6 * z - 0.18);
+            const lofted = rand(x, y, this.step, seed, 40 + k) < longShare;
+            const d = lofted ? P.spot.longMeanPerWindMs * V * Math.exp(z - 0.5) : meanDist * Math.exp(0.6 * z - 0.18);
+            if (!lofted && d > P.spot.distMaxPerWindMs * V) continue;
             const j = ((15 * Math.PI) / 180) * (u3 * 2 - 1);
             const bx = -(wx * Math.cos(j) - wy * Math.sin(j));
             const by = -(wx * Math.sin(j) + wy * Math.cos(j));
@@ -143,8 +149,9 @@ export class CpuFireSim {
             const sx = x + Math.sign(bx * d / cs) * Math.round(Math.abs((bx * d) / cs));
             const sy = y + Math.sign(by * d / cs) * Math.round(Math.abs((by * d) / cs));
             if (sx < 0 || sy < 0 || sx >= W || sy >= H || (sx === x && sy === y)) continue;
-            const sr = s[(sy * W + sx) * 4];
-            if (sr > 0.5 && sr < 1.5) notIgnite *= 1 - Math.min(1, Math.max(0, P.spot.pBase * sus));
+            const src = sy * W + sx;
+            const sr = s[src * 4];
+            if (sr > 0.5 && sr < 1.5) notIgnite *= 1 - Math.min(1, Math.max(0, P.spot.pBase * sus * fuelLeft(src)));
           }
         }
         if (rand(x, y, this.step, seed, 0) < 1 - notIgnite) {

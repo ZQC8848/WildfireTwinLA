@@ -36,8 +36,12 @@ export function surfaceProbability(g: Grid, u: number, v: number, wind: WindFiel
 export function treatmentMultiplier(code: number): number {
     return code === 1 ? E.break.fuelMul : code === 2 ? E.burn.fuelMul : code === 3 ? E.thin.rosMul : 1;
 }
+/** Fuel left in a burning source cell: a fire inside a fuel break or burn unit spreads and throws embers weakly (matches the CA). */
+export function fuelRemaining(code: number): number {
+    return code === 1 ? E.break.fuelMul : code === 2 ? E.burn.fuelMul : 1;
+}
 export function edgeMinutes(g: Grid, u: number, v: number, wind: WindField, mask: Uint8Array, options: import('./types.ts').ArrivalOptions = {}): number {
-    const p = Math.min(1, surfaceProbability(g, u, v, wind) * treatmentMultiplier(mask[v]));
+    const p = Math.min(1, surfaceProbability(g, u, v, wind) * treatmentMultiplier(mask[v]) * fuelRemaining(mask[u]));
     const reference = options.referenceCellSize ?? R.referenceCellSize, scale = options.timeScale ?? R.arrivalTimeScale;
     if (!(reference > 0) || !Number.isFinite(reference) || !(scale > 0) || !Number.isFinite(scale))
         throw Error('Invalid arrival scale');
