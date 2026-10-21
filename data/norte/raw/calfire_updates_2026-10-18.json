@@ -1,0 +1,20 @@
+{
+  "source": "CAL FIRE",
+  "url": "https://www.fire.ca.gov/incidents/2026/10/16/norte-fire/",
+  "retrievedAt": "2026-10-18T18:40:00Z",
+  "note": "Updates after the replay's first day, transcribed from the page; times are the update times shown on the page (PDT). Quotes are verbatim excerpts.",
+  "updates": [
+    {"time": "2026-10-16T19:27:00-07:00", "acres": 570, "contained": null, "quote": "The Norte Fire is 570 acres."},
+    {"time": "2026-10-16T22:35:00-07:00", "acres": 570, "contained": 0, "quote": "...which is currently at 570 acres with 0% containment."},
+    {"time": "2026-10-17T08:07:00-07:00", "acres": 570, "contained": 5, "quote": "The fire remains at 570 acres and is now 5% contained. As reported yesterday, six homes have been damaged or destroyed."},
+    {"time": "2026-10-17T12:18:00-07:00", "quote": "Evacuation Orders for Zones SJC10-B and SCL13 have been lifted.", "orders": [{"zone": "SCL13", "level": "lifted"}, {"zone": "SJC10", "level": "partly lifted", "detail": "SJC10 was split into SJC10-A and SJC10-B at 12:10 PM; SJC10-B lifted, SJC10-A remains under order"}]},
+    {"time": "2026-10-17T18:21:00-07:00", "contained": 25, "quote": "Effective today at 6 p.m., evacuation orders for San Clemente and San Juan Capistrano will be lifted. Via La Mirada will remain closed north of Esperanza to vehicle traffic to allow emergency crews to continue working. The burn scar remains an active fire hazard area and is closed until further notice. The fire is currently at 25% containment.", "ordersEffective": "2026-10-17T18:00:00-07:00", "orders": [{"zone": "SCL12", "level": "lifted"}, {"zone": "SJC04", "level": "lifted"}, {"zone": "SJC05", "level": "lifted"}, {"zone": "SJC10", "level": "lifted"}], "closure": "Via La Mirada closed to vehicles north of Esperanza; the burn scar is closed until further notice"},
+    {"time": "2026-10-18T10:20:00-07:00", "contained": 50, "quote": "The Norte Fire is 50% contained."}
+  ],
+  "knockdown": {
+    "time": "2026-10-16T17:45:00-07:00",
+    "quote": "Crews knocked down the majority of the fire by 5:45 p.m., according to Capt. Steve Concialdi.",
+    "source": "Orange County Fire Authority, as reported by CBS Los Angeles",
+    "url": "https://www.cbsnews.com/losangeles/news/norte-fire-san-clemente-orange-county-fire-authority/"
+  }
+}

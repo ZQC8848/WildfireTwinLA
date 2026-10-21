@@ -90,8 +90,14 @@ wildfire-norte-perimeter
 wildfire-norte-damage
 ```
 
-Build the Norte replay from the archived WFIGS, HRRR, and FIRMS inputs. It ends at 18:00 PDT,
-when the fire was knocked down, and adds `data/norte/perimeter.json` as the last event:
+Build the Norte replay from the archived WFIGS, HRRR, FIRMS and CAL FIRE inputs. Fire behaviour
+inputs (wind, hotspots) end at 18:00 PDT on 10-16, when the fire was knocked down; the VIIRS-detected
+area (`data/norte/viirs-area.json`) closes that first day. The replay then plays the next days 48
+times faster: the knockdown (the model stops spreading), the first satellite pass with no heat at the
+fire (the model flames are put out), CAL FIRE acreage and containment, orders lifted, and the NIFC
+perimeter (`data/norte/perimeter.json`) when it was mapped. Run `wildfire-norte-perimeter
+--wfigs-file ../data/norte/raw/wfigs_perimeter_2026-10-18.geojson` first to rebuild both perimeter
+files from the archive:
 
 ```bash
 wildfire-norte-replay \

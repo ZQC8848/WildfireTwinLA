@@ -72,6 +72,7 @@ uniform int uSpotSamples;
 uniform float uSpotMaxPerMs;
 uniform float uSpotLongShare;
 uniform float uSpotLongPerMs;
+uniform bool uHold;         // 扑救压住火势：不再有新的格子着火，正在燃烧的照常烧完
 uniform ivec2 uTiles;
 uniform float uDirJitter;   // 弧度
 uniform float uSpeedJitter; // 比例
@@ -114,8 +115,8 @@ void main() {
     return;
   }
 
-  // 未燃：不可燃格永远不会着火
-  if (g.a < 0.5) { pc_fragColor = s; return; }
+  // 未燃：不可燃格永远不会着火；火势被压住后也不再有新的格子着火
+  if (g.a < 0.5 || uHold) { pc_fragColor = s; return; }
 
   vec2 wind = windAt(c);
   if (tileId > 0u) {
@@ -205,6 +206,18 @@ void main() {
   if (texelFetch(uMask, c, 0).r > 0.5 && s.r < 0.5 && cls > 0.5) {
     s = vec4(1.0, 0.0, uMinutes, s.a);
   }
+  pc_fragColor = s;
+}
+`;
+
+/** 扑灭：正在燃烧的格子直接变为燃尽，着火时刻保留 */
+export const extinguishFragment = /* glsl */ `
+${common}
+uniform sampler2D uState;
+
+void main() {
+  vec4 s = texelFetch(uState, ivec2(gl_FragCoord.xy), 0);
+  if (s.r > 0.5 && s.r < 1.5) s.r = 2.0;
   pc_fragColor = s;
 }
 `;

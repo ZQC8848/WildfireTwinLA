@@ -84,6 +84,8 @@ function downsampleTreat(mask: Uint8Array, W: number, out: Uint8Array, w: number
 export class Ensemble {
   readonly grid: Grid;
   readonly size: number;
+  /** 火势已被扑救压住时，所有成员都不再蔓延（与 FireSim.held 一致） */
+  held = false;
   private targets: [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget];
   private stats: THREE.WebGLRenderTarget;
   private cur = 0;
@@ -145,6 +147,7 @@ export class Ensemble {
       uSpotMaxPerMs: { value: SpreadParams.spot.distMaxPerWindMs },
       uSpotLongShare: { value: SpreadParams.spot.longShare },
       uSpotLongPerMs: { value: SpreadParams.spot.longMeanPerWindMs },
+      uHold: { value: false },
       uTreat: { value: this.treatTex },
       uBreakMul: { value: m.break },
       uBurnMul: { value: m.burn },
@@ -187,6 +190,7 @@ export class Ensemble {
     u.uWindSize.value.set(this.wind.texture.image.width, this.wind.texture.image.height);
     u.uSeed.value = seed;
     u.uStepMinutes.value = this.stepMinutes;
+    u.uHold.value = this.held;
     downsampleTreat(treatMask, this.fullW, this.treat, this.size, ENSEMBLE_FACTOR);
     this.treatTex.needsUpdate = true;
 

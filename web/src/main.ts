@@ -163,14 +163,19 @@ let outlook: CommunityOutlook[] | null = null;
 let forecastShown = true;
 /** 预报显示时，模拟每推进这么久就自动重算一次 */
 const FORECAST_REFRESH_MIN = 60;
+/** 时间戳 → 火场当地时间，如 "Oct 18, 10:20 AM"（回放里的官方通报都按当地时间发布） */
+const pdtTime = (ms: number) => new Date(ms).toLocaleString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
 function runForecast() {
   if (!simActive) return;
+  ensemble.held = sim.held;
   forecast = ensemble.run(sim.texture, sim.minutes, currentWind, sim.treatMask);
   outlook = communityOutlook(forecast, bundle.communities, meta.width, ensemble.size);
   showForecast();
   shell.setForecast(
     true,
-    `From T + ${formatMinutes(forecast.startMinutes)}: ${ENSEMBLE_MEMBERS} runs × ${forecast.steps} steps on a ${ensemble.size} × ${ensemble.size} grid (${ensemble.grid.meta.cellSize} m) in ${Math.round(forecast.ms)} ms on the GPU. Updates every simulated hour while shown.`,
+    `From T + ${formatMinutes(forecast.startMinutes)}: ${ENSEMBLE_MEMBERS} runs × ${forecast.steps} steps on a ${ensemble.size} × ${ensemble.size} grid (${ensemble.grid.meta.cellSize} m) in ${Math.round(forecast.ms)} ms on the GPU. Updates every simulated hour while shown.` +
+      (sim.held ? " Crews have held this fire, so no run spreads it further." : ""),
     outlook,
   );
 }
@@ -947,6 +952,7 @@ function refreshPanels() {
     viewMinutes ?? sim.minutes,
     viewMinutes === null,
     [...monitor.events.map((e) => ({ minutes: e.minutes, level: e.level })), ...realtime.ticks()],
+    realtime.timeScale(),
   );
   const reached = monitor.communities.filter((c) => c.level === "reached").length;
   const fs = simActive ? sim.stats() : null;
@@ -986,6 +992,14 @@ function refreshPanels() {
       const iou = realtime.perimeterMatch(sim.lastState);
       if (iou !== null) feedRows.push(["Overlap with simulation", `${Math.round(iou * 100)}%`]);
     }
+    const st = realtime.incidentStatus;
+    if (st) {
+      const parts = [st.acres !== null ? `${st.acres.toLocaleString("en-US")} acres` : "", st.containedPercent !== null ? `${st.containedPercent}% contained` : ""].filter(Boolean);
+      feedRows.push([`Official status (${st.source}, ${pdtTime(st.time)})`, parts.join(", ")]);
+    }
+    const sup = realtime.suppression;
+    if (sup.outAt !== null) feedRows.push(["Model fire", `Out: no heat at the fire in the satellite pass at ${pdtTime(sup.outAt)}`]);
+    else if (sup.heldAt !== null) feedRows.push(["Model fire", `Held by crews from ${pdtTime(sup.heldAt)}; no new spread`]);
   }
   shell.setFeed(realtime.mode, realtime.status, feedRows, realtime.bundledReplay);
   shell.setRespond(simActive ? monitor.closest() : null, monitor.communities, { affected: monitor.homesAffected, total: monitor.totalHomes }, monitor.events);
