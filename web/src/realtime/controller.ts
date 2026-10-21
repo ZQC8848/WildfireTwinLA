@@ -5,11 +5,13 @@
 // - 风：更新来流风（地形风场随之重算）
 // - 官方火界：画成对照轮廓，计算模拟火场与它的重合度（IoU）
 // - 模型告警、官方疏散令、外呼状态：写入事件流与外呼统计
+// - 扑救：官方说火势已被压住时，模拟不再蔓延；之后的卫星过境在火场没有热点时，扑灭剩余的模拟火焰
+// - 官方火情通报（面积、控制率）：记下最新一条，显示在数据源面板
 
 import { SpreadParams, type Community, type Grid, type Wind, type WindField } from "@core";
 import type { FeedEvent, FeedHotspot } from "../net/messages";
 import { FeedClient, type FeedMode, type FeedState } from "../net/feed";
-import { REPLAY_MINUTES_PER_SECOND } from "../net/replayClock";
+import { replayMinutesAt, replayOffset, UNIFORM_CLOCK, type ReplayClock } from "../net/replayClock";
 import type { HotspotMarkers } from "../scene/hotspots";
 import type { FireMonitor } from "../sim/fireMonitor";
 import type { FireSim } from "../sim/fireSim";
@@ -33,6 +35,12 @@ export interface SatellitePass {
   reached: number;
   /** 模拟火场中落在已有探测范围内的比例 */
   confirmedShare: number;
+}
+
+/** 时间轴位置与模拟分钟之间的换算 */
+export interface TimeScale {
+  toPos(minutes: number): number;
+  toMinutes(pos: number): number;
 }
 
 export interface RealtimeDeps {
@@ -68,6 +76,12 @@ export class RealtimeController {
   perimeterLabel = "Official perimeter";
   passes: SatellitePass[] = [];
   reports: { minutes: number; name: string }[] = [];
+  /** 最新的官方火情通报：面积与控制率分别取最近一条给出它的通报 */
+  incidentStatus: { acres: number | null; containedPercent: number | null; time: number; source: string } | null = null;
+  /** 扑救进展：火势被压住、模拟火焰被扑灭的时刻（毫秒时间戳） */
+  suppression: { heldAt: number | null; outAt: number | null } = { heldAt: null, outAt: null };
+  /** 回放时钟（回放文件的 snapshot 可以声明后段快进） */
+  private clock: ReplayClock = UNIFORM_CLOCK;
   private t0: number | null = null;
   private calls = new Map<string, string>();
   /** 累计的卫星探测范围（每个像元按半径 PIXEL_RADIUS 的圆盘） */
@@ -77,7 +91,7 @@ export class RealtimeController {
   private clockWall = 0;
   /** 最后收到的事件的时间（毫秒时间戳） */
   private lastEventTime = 0;
-  /** 回放倍速：每秒墙钟 = REPLAY_MINUTES_PER_SECOND × replaySpeed 分钟事件时间 */
+  /** 回放倍速：每秒墙钟 = REPLAY_MINUTES_PER_SECOND × replaySpeed 分钟事件时间（快进段再乘 fastFactor） */
   replaySpeed = REPLAY_SPEED;
 
   constructor(private d: RealtimeDeps) {
@@ -93,7 +107,8 @@ export class RealtimeController {
   /** 回放进行中时，模拟应当所在的时刻（分钟）；不在回放或回放结束后为 null，模拟按自己的速度运行 */
   replayMinutes(now = performance.now()): number | null {
     if (this.client.mode !== "replay" || this.t0 === null || this.client.state === "ended") return null;
-    return (this.clockEvent - this.t0) / 60000 + ((now - this.clockWall) / 1000) * REPLAY_MINUTES_PER_SECOND * this.replaySpeed;
+    const offset = replayOffset((this.clockEvent - this.t0) / 60000, this.clock) + ((now - this.clockWall) / 1000) * this.replaySpeed;
+    return replayMinutesAt(offset, this.clock);
   }
 
   /** 回放中途改变倍速：先把时钟锚定在当前位置，再让数据源从当前进度按新倍速继续 */
@@ -104,13 +119,20 @@ export class RealtimeController {
     this.clockEvent = this.t0 + minutes * 60000;
     this.clockWall = now;
     this.replaySpeed = speed;
-    const toOffset = (ms: number) => (ms - this.t0!) / 60000 / REPLAY_MINUTES_PER_SECOND;
+    const toOffset = (ms: number) => replayOffset((ms - this.t0!) / 60000, this.clock);
     this.client.setReplaySpeed(speed, toOffset(this.lastEventTime), toOffset(this.clockEvent));
   }
 
   /** 回放是否由存档原始数据现场拼出（还没有后端的回放文件） */
   get bundledReplay(): boolean {
     return this.client.mode === "replay" && !!this.client.local?.bundled;
+  }
+
+  /** 时间轴的比例：回放后段快进时按回放时钟压缩，第一天占时间轴的大部分；其余情况为 null（线性） */
+  timeScale(): TimeScale | null {
+    if (this.client.mode !== "replay" || this.clock.fastFactor === 1) return null;
+    const clock = this.clock;
+    return { toPos: (minutes) => replayOffset(minutes, clock), toMinutes: (pos) => replayMinutesAt(pos, clock) };
   }
 
   /** 时间轴刻度：卫星过境与报告起火点 */
@@ -141,6 +163,9 @@ export class RealtimeController {
     this.dataset = "";
     this.passes = [];
     this.reports = [];
+    this.incidentStatus = null;
+    this.suppression = { heldAt: null, outAt: null };
+    this.clock = UNIFORM_CLOCK;
     this.coverage.fill(0);
     this.clockEvent = 0;
     this.lastEventTime = 0;
@@ -163,7 +188,9 @@ export class RealtimeController {
       connected: this.client.mode === "live" ? "Connected. Waiting for new hotspots and wind updates." : "Connected. Playing the Norte Fire replay.",
       local: detail,
       retrying: detail,
-      ended: "Replay finished and paused at the last update. Press Run to keep simulating from here.",
+      ended: this.d.sim.held
+        ? "Replay finished at the latest public update. Crews held the fire, so the model fire stays out."
+        : "Replay finished and paused at the last update. Press Run to keep simulating from here.",
     };
     this.status = label[state];
     // 回放结束时停在最后一个事件的时刻，而不是让模拟一路跑下去
@@ -278,11 +305,12 @@ export class RealtimeController {
       this.clockWall = performance.now();
     }
     // 回放：先把模拟推进到事件时刻，事件流里的时间才与真实时间对应
-    if (e.kind === "official" || e.kind === "incident" || e.kind === "alert") this.catchUp(e.time);
+    if (e.kind === "official" || e.kind === "incident" || e.kind === "alert" || e.kind === "suppression" || e.kind === "status") this.catchUp(e.time);
     const now = sim.minutes;
     switch (e.kind) {
       case "snapshot":
         this.dataset = e.dataset ?? "";
+        this.clock = e.clock ?? UNIFORM_CLOCK;
         if (this.client.mode === "replay") monitor.log(now, `Replay started${e.dataset ? ` (${e.dataset})` : ""}`, "watch");
         break;
       case "wind":
@@ -336,8 +364,28 @@ export class RealtimeController {
         break;
       }
       case "official":
-        monitor.log(now, `Official ${e.level} for ${this.communityName(e.communityId)}: ${e.headline}`, "reached");
+        if (/lifted/.test(e.level)) monitor.log(now, `Official: ${e.headline} (${this.communityName(e.communityId)})`, "watch");
+        else monitor.log(now, `Official ${e.level} for ${this.communityName(e.communityId)}: ${e.headline}`, "reached");
         break;
+      case "suppression":
+        if (e.action === "hold") {
+          sim.hold();
+          this.suppression.heldAt = e.time;
+          monitor.log(now, `${e.headline} (${e.source}). The model fire stops spreading; cells already burning burn out.`, "watch");
+        } else {
+          sim.extinguish();
+          sim.statsSync();
+          this.suppression.outAt = e.time;
+          monitor.log(now, `${e.headline} (${e.source}). Remaining model flames put out.`, "watch");
+        }
+        break;
+      case "status": {
+        const prev = this.incidentStatus;
+        this.incidentStatus = { acres: e.acres ?? prev?.acres ?? null, containedPercent: e.containedPercent ?? prev?.containedPercent ?? null, time: e.time, source: e.source };
+        const parts = [e.acres !== null ? `${e.acres.toLocaleString("en-US")} acres` : "", e.containedPercent !== null ? `${e.containedPercent}% contained` : ""].filter(Boolean);
+        monitor.log(now, `${e.source}: ${parts.join(", ") || e.headline}`, "watch");
+        break;
+      }
       case "call":
         if (e.buildingId) this.calls.set(e.buildingId, e.status);
         break;

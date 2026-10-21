@@ -14,10 +14,19 @@ NORTE_BBOX = (-117.714, 33.427, -117.576, 33.543)
 NORTE_IGNITION = datetime(2026, 10, 16, 18, 32, 56, tzinfo=UTC)
 MIRADA_IGNITION = datetime(2026, 10, 16, 19, 19, 54, tzinfo=UTC)
 LANDFILL = (33.4905, -117.6185)
-# The replay ends at 18:00 PDT: the last VIIRS detection was 21:48Z, wind dropped below
-# 4 m/s after 00:00Z and OCFA reported most of the fire knocked down by 17:45 PDT. The
-# simulator has no suppression, so running it longer only grows an unopposed fire.
+# Day one ends at 18:00 PDT: the last VIIRS detection was 21:48Z, wind dropped below
+# 4 m/s after 00:00Z and OCFA reported most of the fire knocked down by 17:45 PDT. Fire
+# behaviour inputs (wind, hotspots) stop here. The replay then plays the official updates of
+# the next days FAST_FACTOR times faster: containment, orders lifted, the NIFC perimeter. The
+# knockdown stops the model spread, and the first satellite pass with no heat at the fire puts
+# the model flames out, so the simulator never grows a fire that crews had already held.
 REPLAY_END = datetime(2026, 10, 17, 1, 0, tzinfo=UTC)
+FAST_FACTOR = 48
+UPDATES_FILE = "calfire_updates_2026-10-18.json"
+VIIRS_7D = "firms_viirs_*_7d_2026-10-18.csv"
+SATELLITES = {"N": "S-NPP", "N20": "NOAA-20", "N21": "NOAA-21"}
+# A pass is "quiet" when none of its detections lies within this distance of a day-one detection
+QUIET_RADIUS_M = 2000
 # No public source gives the issue time of the orders. News coverage shows them in place by
 # about 12:30 PDT, so the events sit there and are flagged as approximate.
 ORDER_TIME = datetime(2026, 10, 16, 19, 30, tzinfo=UTC)
@@ -42,7 +51,19 @@ def _distance_m(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> float
 
 
 def _offset(when: datetime) -> float:
-    return round((when - NORTE_IGNITION).total_seconds() / 300, 3)
+    """Replay seconds: 1 s = 5 min of fire time on day one, FAST_FACTOR times faster after it."""
+    seconds = (min(when, REPLAY_END) - NORTE_IGNITION).total_seconds() / 300
+    if when > REPLAY_END:
+        seconds += (when - REPLAY_END).total_seconds() / (300 * FAST_FACTOR)
+    return round(seconds, 3)
+
+
+def _iso(when: datetime) -> str:
+    return when.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _pdt(value: str) -> datetime:
+    return datetime.fromisoformat(value).astimezone(UTC)
 
 
 def _confidence(value: str) -> float:
@@ -234,19 +255,157 @@ def _order_events() -> list[dict]:
     ]
 
 
-def _perimeter_event(path: Path | None) -> list[dict]:
-    """Final incident event from `wildfire-norte-perimeter`, sent at the end of the replay.
+def _viirs_rows(paths: list[Path]) -> list[tuple[datetime, str, float, float]]:
+    rows = []
+    for path in paths:
+        with path.open(newline="") as stream:
+            for row in csv.DictReader(stream):
+                when = datetime.strptime(
+                    f"{row['acq_date']} {row['acq_time'].zfill(4)}", "%Y-%m-%d %H%M"
+                ).replace(tzinfo=UTC)
+                rows.append(
+                    (when, row["satellite"], float(row["latitude"]), float(row["longitude"]))
+                )
+    return rows
 
-    The perimeter's own observation time is kept in `observedAt`. It describes the final
-    extent, and the fire was knocked down by the end of the replay window.
+
+def _quiet_pass(raw_dir: Path, after: datetime) -> tuple[datetime, str] | None:
+    """First satellite pass after `after` that saw the area but no heat near the fire.
+
+    Only passes with at least one detection in the archived area are known to have happened, so a
+    pass is evidence only if it detected something elsewhere and nothing within QUIET_RADIUS_M of
+    a day-one detection.
+    """
+    rows = _viirs_rows(sorted(raw_dir.glob(VIIRS_7D)))
+    west, south, east, north = NORTE_BBOX
+    fire = [
+        (lat, lon)
+        for when, _, lat, lon in rows
+        if NORTE_IGNITION <= when <= REPLAY_END
+        and west <= lon <= east
+        and south <= lat <= north
+        and _distance_m(lat, lon, *LANDFILL) > 750
+    ]
+    passes: dict[tuple[datetime, str], list[tuple[float, float]]] = defaultdict(list)
+    for when, satellite, lat, lon in rows:
+        if when > after:
+            passes[(when, satellite)].append((lat, lon))
+    for key in sorted(passes):
+        near = any(
+            _distance_m(lat, lon, f_lat, f_lon) <= QUIET_RADIUS_M
+            for lat, lon in passes[key]
+            for f_lat, f_lon in fire
+        )
+        if fire and not near:
+            return key
+    return None
+
+
+def _suppression_events(raw_dir: Path) -> list[dict]:
+    path = raw_dir / UPDATES_FILE
+    if not path.exists():
+        return []
+    knockdown = json.loads(path.read_text())["knockdown"]
+    held = _pdt(knockdown["time"])
+    events = [
+        {
+            "offsetSeconds": _offset(held),
+            "type": "suppression",
+            "emittedAt": _iso(held),
+            "id": "norte-2026",
+            "action": "hold",
+            "headline": "Crews knocked down most of the fire",
+            "quote": knockdown["quote"],
+            "source": knockdown["source"],
+            "sourceUrl": knockdown["url"],
+            "timeApproximate": True,
+        }
+    ]
+    quiet = _quiet_pass(raw_dir, held)
+    if quiet:
+        when, satellite = quiet
+        name = SATELLITES.get(satellite, satellite)
+        events.append(
+            {
+                "offsetSeconds": _offset(when),
+                "type": "suppression",
+                "emittedAt": _iso(when),
+                "id": "norte-2026",
+                "action": "extinguish",
+                "headline": f"No heat detected at the fire in the VIIRS {name} pass",
+                "source": "NASA FIRMS VIIRS NRT",
+                "satellite": satellite,
+            }
+        )
+    return events
+
+
+def _update_events(raw_dir: Path) -> list[dict]:
+    """CAL FIRE status (acres, containment) and evacuation orders lifted after day one."""
+    path = raw_dir / UPDATES_FILE
+    if not path.exists():
+        return []
+    data = json.loads(path.read_text())
+    events = []
+    for update in data["updates"]:
+        posted = _pdt(update["time"])
+        if update.get("acres") is not None or update.get("contained") is not None:
+            events.append(
+                {
+                    "offsetSeconds": _offset(posted),
+                    "type": "incident_status",
+                    "emittedAt": _iso(posted),
+                    "id": "norte-2026",
+                    "acres": update.get("acres"),
+                    "containedPercent": update.get("contained"),
+                    "headline": update["quote"],
+                    "source": data["source"],
+                    "sourceUrl": data["url"],
+                }
+            )
+        effective = _pdt(update.get("ordersEffective") or update["time"])
+        for order in update.get("orders", []):
+            zone = order["zone"]
+            detail = order.get("detail") or update.get("closure")
+            headline = f"Evacuation order {order['level']} for {zone}" + (
+                f". {detail}" if detail else ""
+            )
+            events.append(
+                {
+                    "offsetSeconds": _offset(effective),
+                    "type": "official_order",
+                    "emittedAt": _iso(effective),
+                    "id": f"norte-order-{zone.lower()}-{order['level'].replace(' ', '-')}",
+                    "communityId": zone.lower(),
+                    "level": order["level"],
+                    "headline": headline,
+                    "source": data["source"],
+                    "sourceUrl": data["url"],
+                    "sourceUrls": [data["url"]],
+                    "issuedAt": _iso(posted),
+                    "timeApproximate": False,
+                    "expiresAt": None,
+                    "official": True,
+                }
+            )
+    return events
+
+
+def _perimeter_event(path: Path | None) -> list[dict]:
+    """Incident event carrying a perimeter from `wildfire-norte-perimeter`.
+
+    Sent when it was observed, but no earlier than the end of day one: the VIIRS-detected area
+    closes day one, and the NIFC perimeter arrives when it was mapped.
     """
     if not path or not path.exists():
         return []
     perimeter = json.loads(path.read_text())
-    emitted = REPLAY_END.isoformat().replace("+00:00", "Z")
+    observed = perimeter.get("observedAt")
+    at = max(REPLAY_END, _pdt(observed)) if observed else REPLAY_END
+    emitted = _iso(at)
     return [
         {
-            "offsetSeconds": _offset(REPLAY_END),
+            "offsetSeconds": _offset(at),
             "type": "incident",
             "emittedAt": emitted,
             "id": "norte-2026",
@@ -262,8 +421,12 @@ def _perimeter_event(path: Path | None) -> list[dict]:
 
 
 def build_events(
-    raw_dir: Path, grid: dict | None = None, perimeter: Path | None = None
+    raw_dir: Path,
+    grid: dict | None = None,
+    perimeter: Path | None = None,
+    viirs_area: Path | None = None,
 ) -> list[dict]:
+    has_updates = (raw_dir / UPDATES_FILE).exists()
     events = [
         {
             "offsetSeconds": 0,
@@ -271,17 +434,33 @@ def build_events(
             "emittedAt": NORTE_IGNITION.isoformat().replace("+00:00", "Z"),
             "mode": "replay",
             "event": "norte",
-            "dataset": "public-nrt-2026-10-16",
+            "dataset": "public-nrt-2026-10-18" if has_updates else "public-nrt-2026-10-16",
             "incidents": [],
             "wind": None,
+            # After day one the replay runs FAST_FACTOR times faster (see _offset)
+            "clock": {
+                "fastAfterMinutes": (REPLAY_END - NORTE_IGNITION).total_seconds() / 60,
+                "fastFactor": FAST_FACTOR,
+            },
         }
     ]
     events.extend(_report_events(grid))
     events.extend(_wind_events(raw_dir / "hrrr_5x5_2026-10-15_17.json"))
     events.extend(_viirs_events(sorted(raw_dir.glob("firms_viirs_*_48h_2026-10-17.csv")), grid))
     events.extend(_order_events())
+    events.extend(_perimeter_event(viirs_area))
     events.extend(_perimeter_event(perimeter))
-    priority = {"snapshot": 0, "wind": 1, "hotspots": 2, "incident": 3, "official_order": 4}
+    events.extend(_suppression_events(raw_dir))
+    events.extend(_update_events(raw_dir))
+    priority = {
+        "snapshot": 0,
+        "wind": 1,
+        "hotspots": 2,
+        "suppression": 3,
+        "incident": 4,
+        "incident_status": 5,
+        "official_order": 6,
+    }
     events.sort(key=lambda event: (event["offsetSeconds"], priority[event["type"]]))
     for sequence, event in enumerate(events):
         event["sequence"] = sequence
@@ -298,9 +477,14 @@ def main() -> None:
         default="../data/norte/perimeter.json",
         help="Output of wildfire-norte-perimeter; skipped when the file does not exist",
     )
+    parser.add_argument(
+        "--viirs-area",
+        default="../data/norte/viirs-area.json",
+        help="VIIRS-detected area from wildfire-norte-perimeter, sent at the end of day one",
+    )
     args = parser.parse_args()
     grid = json.loads(Path(args.grid).read_text()) if args.grid else None
-    events = build_events(Path(args.raw_dir), grid, Path(args.perimeter))
+    events = build_events(Path(args.raw_dir), grid, Path(args.perimeter), Path(args.viirs_area))
     Path(args.output).write_text("\n".join(json.dumps(event) for event in events) + "\n")
 
 

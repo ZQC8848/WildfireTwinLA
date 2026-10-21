@@ -4,6 +4,7 @@
 // - 时间统一为毫秒时间戳
 
 import { lonLatToCell, type GridMeta, type Wind, type WindField } from "@core";
+import type { ReplayClock } from "./replayClock";
 
 export type FeedLevel = "watch" | "warning" | "imminent";
 
@@ -21,12 +22,16 @@ export interface FeedHotspot {
 }
 
 export type FeedEvent =
-  | { kind: "snapshot"; time: number; mode: string; dataset?: string }
+  | { kind: "snapshot"; time: number; mode: string; dataset?: string; clock?: ReplayClock }
   | { kind: "wind"; time: number; field: WindField; mean: Wind }
   | { kind: "hotspots"; time: number; items: FeedHotspot[] }
   | { kind: "incident"; time: number; id: string; perimeterCells: number[] | null; perimeterLabel?: string; perimeterOfficial?: boolean }
   | { kind: "alert"; time: number; communityId: string; level: FeedLevel; etaMin: number }
   | { kind: "official"; time: number; communityId: string; level: string; headline: string }
+  /** 扑救：hold 火势已被压住（不再蔓延），extinguish 卫星确认已无热点（扑灭剩余火焰） */
+  | { kind: "suppression"; time: number; action: "hold" | "extinguish"; headline: string; source: string }
+  /** 官方火情通报：面积（英亩）与控制率 */
+  | { kind: "status"; time: number; acres: number | null; containedPercent: number | null; headline: string; source: string }
   | { kind: "call"; time: number; buildingId: string; status: string }
   | { kind: "error"; time: number; detail: string };
 
@@ -54,8 +59,11 @@ export function normalize(raw: any, meta: GridMeta, now = Date.now()): FeedEvent
   if (!raw || typeof raw !== "object") return null;
   const time = ts(raw.t ?? raw.emittedAt, now);
   switch (raw.type) {
-    case "snapshot":
-      return { kind: "snapshot", time, mode: String(raw.mode ?? ""), dataset: raw.dataset };
+    case "snapshot": {
+      const c = raw.clock;
+      const clock = c && Number.isFinite(Number(c.fastAfterMinutes)) && Number(c.fastFactor) > 0 ? { fastAfterMinutes: Number(c.fastAfterMinutes), fastFactor: Number(c.fastFactor) } : undefined;
+      return { kind: "snapshot", time, mode: String(raw.mode ?? ""), dataset: raw.dataset, clock };
+    }
     case "wind": {
       let field: { width: number; height: number; samples: Wind[] };
       if (Array.isArray(raw.samples) && raw.width && raw.height) {
@@ -91,6 +99,13 @@ export function normalize(raw: any, meta: GridMeta, now = Date.now()): FeedEvent
       return { kind: "alert", time, communityId: String(raw.communityId), level: raw.level, etaMin: Number(raw.etaMin) };
     case "official_order":
       return { kind: "official", time, communityId: String(raw.communityId), level: String(raw.level), headline: String(raw.headline ?? "") };
+    case "suppression":
+      if (raw.action !== "hold" && raw.action !== "extinguish") return null;
+      return { kind: "suppression", time, action: raw.action, headline: String(raw.headline ?? ""), source: String(raw.source ?? "") };
+    case "incident_status": {
+      const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+      return { kind: "status", time, acres: num(raw.acres), containedPercent: num(raw.containedPercent), headline: String(raw.headline ?? ""), source: String(raw.source ?? "") };
+    }
     case "call_status":
       return { kind: "call", time, buildingId: String(raw.buildingId ?? ""), status: String(raw.status) };
     case "error":

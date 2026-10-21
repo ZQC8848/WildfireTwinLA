@@ -12,6 +12,10 @@
 //   ps = exp(a·θs)，θs 为两格之间的坡度角（度，上坡为正）
 // 多个燃烧邻格独立作用：点燃概率 = 1 − Π(1 − p_i)。
 // 飞火：在上风方向按对数正态距离采样，采样点在燃烧则以 pSpot 概率点燃；建筑格只能被飞火点燃。
+//   草和灌丛的轻飞火占绝大多数：平均飞行距离 uSpotDistPerMs·V，空中约 16 s 燃尽，超过 uSpotMaxPerMs·V 的落点无效。
+//   少量重飞火（房屋、棕榈、被抬升的灌丛）大风时能飞一两公里（Norte 的 MIRADA 起火点在 2.4 km 外）：
+//   占比从 5 m/s 时的 0 线性升到 10 m/s 时的 uSpotLongShare，平均距离 uSpotLongPerMs·V，σ = 1.0，不设上限。
+// 处理过的格子燃料少：防火带、计划烧除里的燃烧格向外蔓延和放出飞火都按剩余燃料（fuelMul）打折。
 //
 // 随机数用无符号整数哈希（PCG），GPU 与 CPU 参考实现得到同一串随机数。
 //
@@ -65,6 +69,10 @@ uniform bool uSpotting;
 uniform float uSpotBase;
 uniform float uSpotDistPerMs;
 uniform int uSpotSamples;
+uniform float uSpotMaxPerMs;
+uniform float uSpotLongShare;
+uniform float uSpotLongPerMs;
+uniform bool uHold;         // 扑救压住火势：不再有新的格子着火，正在燃烧的照常烧完
 uniform ivec2 uTiles;
 uniform float uDirJitter;   // 弧度
 uniform float uSpeedJitter; // 比例
@@ -78,6 +86,12 @@ vec2 windAt(ivec2 c) {
   vec2 a = mix(texelFetch(uWind, p0, 0).rg, texelFetch(uWind, ivec2(p1.x, p0.y), 0).rg, f.x);
   vec2 b = mix(texelFetch(uWind, ivec2(p0.x, p1.y), 0).rg, texelFetch(uWind, p1, 0).rg, f.x);
   return mix(a, b, f.y);
+}
+
+// 燃烧格剩下的燃料（块内坐标）：防火带、计划烧除按 fuelMul，其余为 1
+float fuelLeft(ivec2 c) {
+  int t = int(texelFetch(uTreat, c, 0).r * 255.0 + 0.5);
+  return t == 1 ? uBreakMul : t == 2 ? uBurnMul : 1.0;
 }
 
 void main() {
@@ -101,8 +115,8 @@ void main() {
     return;
   }
 
-  // 未燃：不可燃格永远不会着火
-  if (g.a < 0.5) { pc_fragColor = s; return; }
+  // 未燃：不可燃格永远不会着火；火势被压住后也不再有新的格子着火
+  if (g.a < 0.5 || uHold) { pc_fragColor = s; return; }
 
   vec2 wind = windAt(c);
   if (tileId > 0u) {
@@ -138,7 +152,7 @@ void main() {
         float slope = degrees(atan(g.r - texelFetch(uGrid, n, 0).r, dist));
         float ps = exp(uA * slope);
         // 对角邻格的概率略降，减轻方格网造成的方形火场
-        float p = clamp(base * pw * ps * (diag ? 0.83 : 1.0) * treatMul, 0.0, 1.0);
+        float p = clamp(base * pw * ps * (diag ? 0.83 : 1.0) * treatMul * fuelLeft(n), 0.0, 1.0);
         notIgnite *= 1.0 - p;
       }
     }
@@ -147,21 +161,24 @@ void main() {
   if (uSpotting && V > 2.0) {
     // 飞火：从本格逆风回溯，看上风方向一定距离处是否有燃烧格
     float meanDist = uSpotDistPerMs * V;
+    float longShare = uSpotLongShare * clamp((V - 5.0) / 5.0, 0.0, 1.0);
     float susceptibility = (g.a > 1.5 ? 2.5 * (0.5 + g.b) * (treat == 4 ? uZone0Mul : 1.0) : g.g * (0.5 + g.b)) * treatMul;
     for (int k = 0; k < 8; k++) {
       if (k >= uSpotSamples) break;
       float u1 = max(rand(c, uStep, seed, uint(10 + k * 3)), 1e-6);
       float u2 = rand(c, uStep, seed, uint(11 + k * 3));
       float u3 = rand(c, uStep, seed, uint(12 + k * 3));
-      // 对数正态：sigma = 0.6，均值约为 meanDist
+      // 对数正态：轻飞火 sigma = 0.6、均值 meanDist，超过燃尽距离的不算；重飞火 sigma = 1.0
       float z = sqrt(-2.0 * log(u1)) * cos(6.2831853 * u2);
-      float d = meanDist * exp(0.6 * z - 0.18);
+      bool lofted = rand(c, uStep, seed, uint(40 + k)) < longShare;
+      float d = lofted ? uSpotLongPerMs * V * exp(z - 0.5) : meanDist * exp(0.6 * z - 0.18);
+      if (!lofted && d > uSpotMaxPerMs * V) continue;
       float jitter = radians(15.0) * (u3 * 2.0 - 1.0);
       vec2 back = -vec2(wdir.x * cos(jitter) - wdir.y * sin(jitter), wdir.x * sin(jitter) + wdir.y * cos(jitter));
       ivec2 src = c + ivec2(round(back * d / uCellSize));
       if (src.x < 0 || src.y < 0 || src.x >= uSize.x || src.y >= uSize.y || src == c) continue;
       float sr = texelFetch(uState, o + src, 0).r;
-      if (sr > 0.5 && sr < 1.5) notIgnite *= 1.0 - clamp(uSpotBase * susceptibility, 0.0, 1.0);
+      if (sr > 0.5 && sr < 1.5) notIgnite *= 1.0 - clamp(uSpotBase * susceptibility * fuelLeft(src), 0.0, 1.0);
     }
   }
 
@@ -189,6 +206,18 @@ void main() {
   if (texelFetch(uMask, c, 0).r > 0.5 && s.r < 0.5 && cls > 0.5) {
     s = vec4(1.0, 0.0, uMinutes, s.a);
   }
+  pc_fragColor = s;
+}
+`;
+
+/** 扑灭：正在燃烧的格子直接变为燃尽，着火时刻保留 */
+export const extinguishFragment = /* glsl */ `
+${common}
+uniform sampler2D uState;
+
+void main() {
+  vec4 s = texelFetch(uState, ivec2(gl_FragCoord.xy), 0);
+  if (s.r > 0.5 && s.r < 1.5) s.r = 2.0;
   pc_fragColor = s;
 }
 `;

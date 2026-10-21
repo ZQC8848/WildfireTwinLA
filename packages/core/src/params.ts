@@ -6,14 +6,25 @@ export const SpreadParams = {
   c2: 0.131,
   a: 0.078,
   spot: {
-    pBase: 0.02,
-    distMeanPerWindMs: 40,
+    pBase: 0.03,
+    // Light embers from grass and sage scrub: lognormal (sigma 0.6) flight distance with this
+    // mean per m/s of wind, and they burn out aloft after about 16 s, so none lands farther
+    // than distMaxPerWindMs per m/s. A 150 m fuel break therefore stops them below ~10 m/s.
+    distMeanPerWindMs: 12,
+    distMaxPerWindMs: 16,
+    // Rare lofted embers (structures, palms, lifted brush) travel far in strong wind, like the
+    // Norte MIRADA spot fire 2.4 km downwind. Their share of samples ramps from 0 at 5 m/s to
+    // longShare at 10 m/s; lognormal (sigma 1.0) with this mean per m/s, uncapped.
+    longShare: 0.002,
+    longMeanPerWindMs: 160,
     samples: 4,
   },
   // Minutes per step; synthetic default until Eaton replay calibration is complete.
   stepMinutes: 5,
 };
 
+// fuelMul is the fuel left in a treated cell. It lowers the chance that the cell ignites and,
+// once it burns, how strongly it spreads to neighbours and how many embers it throws.
 export const TreatmentEffect = {
   break: { fuelMul: 0.05 },
   burn: { fuelMul: 0.3 },

@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { FullScreenQuad } from "three/examples/jsm/postprocessing/Pass.js";
 import { CellClass, GRID_CHANNELS, SpreadParams, type Grid, type WindField } from "@core";
 import { treatmentMultipliers } from "./cpuReference";
-import { fullscreenVertex, igniteFragment, resetFragment, stepFragment } from "./shaders";
+import { extinguishFragment, fullscreenVertex, igniteFragment, resetFragment, stepFragment } from "./shaders";
 import { WindTexture } from "./wind";
 
 export interface FireStats {
@@ -22,12 +22,15 @@ export class FireSim {
   step = 0;
   seed = 1;
   spotting = true;
+  /** 扑救压住了火势：不再有新的格子着火（回放中的官方"火势已被压住"事件设置，reset 时清除） */
+  held = false;
   private targets: [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget];
   private cur = 0;
   private quad = new FullScreenQuad();
   private stepMat: THREE.ShaderMaterial;
   private igniteMat: THREE.ShaderMaterial;
   private resetMat: THREE.ShaderMaterial;
+  private extinguishMat: THREE.ShaderMaterial;
   private wind: WindTexture;
   private mask: Float32Array;
   private maskTex: THREE.DataTexture;
@@ -97,6 +100,10 @@ export class FireSim {
       uSpotBase: { value: SpreadParams.spot.pBase },
       uSpotDistPerMs: { value: SpreadParams.spot.distMeanPerWindMs },
       uSpotSamples: { value: SpreadParams.spot.samples },
+      uSpotMaxPerMs: { value: SpreadParams.spot.distMaxPerWindMs },
+      uSpotLongShare: { value: SpreadParams.spot.longShare },
+      uSpotLongPerMs: { value: SpreadParams.spot.longMeanPerWindMs },
+      uHold: { value: false },
       uTiles: { value: new THREE.Vector2(1, 1) },
       uDirJitter: { value: 0 },
       uSpeedJitter: { value: 0 },
@@ -114,6 +121,7 @@ export class FireSim {
       uMinutes: { value: 0 },
     });
     this.resetMat = mat(resetFragment, {});
+    this.extinguishMat = mat(extinguishFragment, { uState: { value: null } });
     this.reset();
   }
 
@@ -156,6 +164,7 @@ export class FireSim {
 
   reset() {
     this.step = 0;
+    this.held = false;
     this.burningSample = [];
     this.burningWeight = [];
     this.lastState = null;
@@ -186,8 +195,19 @@ export class FireSim {
     this.render(this.igniteMat);
   }
 
+  /** 火势被压住：之后不再蔓延，正在燃烧的格子照常烧完 */
+  hold() {
+    this.held = true;
+  }
+
+  /** 扑灭：正在燃烧的格子全部变为燃尽（卫星确认火场已无热点） */
+  extinguish() {
+    this.render(this.extinguishMat);
+  }
+
   advance(steps = 1) {
     const u = this.stepMat.uniforms;
+    u.uHold.value = this.held;
     u.uSeed.value = this.seed;
     u.uSpotting.value = this.spotting;
     u.uStepMinutes.value = SpreadParams.stepMinutes;

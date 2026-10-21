@@ -26,13 +26,15 @@ Eaton support stays in the code (the `event=eaton` replay and the seed file) but
 |---|---|---|
 | Ignition (NORTE) | 2026-10-16 11:32:56 PDT, 33.479656, −117.634842 (near Portico Del Norte / Eminencia Del Norte, San Clemente) | NIFC WFIGS Incident Locations |
 | Second ignition (MIRADA) | 2026-10-16 12:19:54 PDT, 33.476987, −117.661362. This is **2.4 km west, downwind**, 47 min after NORTE, so it is almost certainly an ember spot fire | NIFC WFIGS Incident Locations |
-| Size and containment | 570 acres; containment 5% on the Saturday morning CAL FIRE update (some headlines say 50%) | OCFA via LAist, Fox LA |
+| Size and containment | 570 acres from 19:27 PDT on 10-16. Containment 0% (10-16 22:35), 5% (10-17 08:07), 25% (10-17 18:21), 50% (10-18 10:20 PDT) | CAL FIRE incident page, archived in `raw/calfire_updates_2026-10-18.json` |
+| Knockdown | "Crews knocked down the majority of the fire by 5:45 p.m." (OCFA Capt. Steve Concialdi) | CBS Los Angeles |
 | Damage | At least 6 homes damaged or destroyed, on Avenida Calita, Via La Mirada and Via De Agua (San Juan Capistrano) | OCFA via Fox LA |
-| Evacuation orders | San Juan Capistrano zones SJC04, SJC05, SJC10 and San Clemente SCL12, SCL13. SCL13 has been repopulated and SJC10 partially; the rest are still under order | OCFA via Fox LA |
+| Evacuation orders | San Juan Capistrano zones SJC04, SJC05, SJC10 and San Clemente SCL12, SCL13. SCL13 and SJC10-B lifted at 12:18 PDT on 10-17; all others lifted at 18:00 PDT on 10-17. Via La Mirada stays closed to vehicles north of Esperanza and the burn scar is closed | CAL FIRE incident page |
 | Wind at the fire (HRRR) | 10:00–15:00 PDT: 8–9 m/s from 67–89° (ENE), gusts 11–15 m/s, RH 16–20%. It weakens to 2–4 m/s after 17:00 | Open-Meteo `gfs_hrrr` |
 | First satellite detections | VIIRS passes at 13:08 (NOAA-21, 15 px), 13:44 (S-NPP, 16 px), 14:04 (NOAA-20, 18 px) and 14:48 PDT (NOAA-21, 11 px). FRP is up to ~90 MW | NASA FIRMS NRT |
 | False hotspot | A single weak night pixel at about 33.49, −117.618 on both 10-15 and 10-16, **before** ignition. This is the Prima Deshecha landfill, a static heat source that must be filtered | NASA FIRMS NRT |
-| Official perimeter | **Not yet published** in WFIGS Interagency Perimeters (checked 2026-10-17) | NIFC |
+| Official perimeter | 570.4 acres (230 ha), mapped 10-17 17:42 PDT, "Mixed Methods". Archived as `raw/wfigs_perimeter_2026-10-18.geojson` | NIFC WFIGS Interagency Perimeters |
+| Heat after day one | No VIIRS detection within 2 km of the fire in any pass after 14:48 PDT on 10-16. The first pass that imaged the area with no heat at the fire was NOAA-20 at 02:26 PDT on 10-17 | NASA FIRMS NRT (7-day files, archived 10-18) |
 
 Other fires nearby are out of scope: Henderson (Oceanside, 3,132 ac), an unnamed cluster near 33.35, −117.52 (San Diego County), and Bryson / Peak in LA County.
 

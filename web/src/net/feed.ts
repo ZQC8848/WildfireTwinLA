@@ -174,7 +174,8 @@ export class FeedClient {
         }, at),
       );
     }
-    this.timers.push(window.setTimeout(() => gen === this.generation && this.setState("ended", "Replay finished"), last + 500));
+    // 紧跟最后一个事件结束：快进段 1 秒墙钟就是好几个小时，多等会让时钟越过最后一条通报
+    this.timers.push(window.setTimeout(() => gen === this.generation && this.setState("ended", "Replay finished"), last + 20));
   }
 
   /**

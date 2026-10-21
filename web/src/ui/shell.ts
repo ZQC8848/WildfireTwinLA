@@ -6,6 +6,7 @@ import "./shell.css";
 import { LAYERS, type LayerId } from "../scene/layers";
 import { formatDistance, formatMinutes, type CommunityStatus, type FireEvent } from "../sim/fireMonitor";
 import { TREATMENT_LABELS, TREATMENT_NOTES, TREATMENT_TYPES, type Tool } from "../planner/treatments";
+import type { TimeScale } from "../realtime/controller";
 
 export type PlanKey = "none" | "yours" | "greedy" | "mincut";
 export const PLAN_LABELS: Record<PlanKey, string> = { none: "None", yours: "Yours", greedy: "Greedy", mincut: "Min-cut" };
@@ -380,7 +381,7 @@ export class Shell {
       if (e.key === "h" || e.key === "H") this.q<HTMLButtonElement>("#show-alerts").click();
     });
     const timeline = this.q<HTMLInputElement>("#timeline");
-    timeline.addEventListener("input", () => this.handlers.onScrub(Number(timeline.value)));
+    timeline.addEventListener("input", () => this.handlers.onScrub(Math.round(this.timeToMinutes(Number(timeline.value)) / 5) * 5));
     this.q<HTMLButtonElement>("#now").addEventListener("click", () => this.handlers.onNow());
     this.setBrush(3);
     this.q<HTMLDivElement>("#camera-mode").addEventListener("click", (e) => {
@@ -455,11 +456,17 @@ export class Shell {
   }
 
   /** 时间轴：max 为当前模拟时间，view 为显示时刻；ticks 为事件刻度 */
-  setTimeline(max: number | null, view: number, live: boolean, ticks: { minutes: number; level: string }[]) {
+  /** 时间轴位置 → 模拟分钟（回放快进时不是线性的，见 setTimeline 的 scale） */
+  private timeToMinutes = (pos: number) => pos;
+
+  setTimeline(max: number | null, view: number, live: boolean, ticks: { minutes: number; level: string }[], scale: TimeScale | null = null) {
     const range = this.q<HTMLInputElement>("#timeline");
+    const pos = scale ? (m: number) => scale.toPos(m) : (m: number) => m;
+    this.timeToMinutes = scale ? (p) => scale.toMinutes(p) : (p) => p;
     range.disabled = !max;
-    range.max = String(max ?? 0);
-    if (document.activeElement !== range) range.value = String(live ? (max ?? 0) : view);
+    range.step = scale ? "any" : "5";
+    range.max = String(max ? pos(max) : 0);
+    if (document.activeElement !== range) range.value = String(pos(live ? (max ?? 0) : view));
     this.q<HTMLButtonElement>("#now").hidden = live;
     const el = this.q<HTMLSpanElement>("#elapsed");
     el.classList.toggle("viewing", !live);
@@ -467,7 +474,7 @@ export class Shell {
     this.q<HTMLDivElement>("#timeline-ticks").innerHTML = max
       ? ticks
           .filter((t) => t.minutes <= max)
-          .map((t) => `<i data-level="${t.level}" style="left:${(t.minutes / max) * 100}%"></i>`)
+          .map((t) => `<i data-level="${t.level}" style="left:${(pos(t.minutes) / pos(max)) * 100}%"></i>`)
           .join("")
       : "";
   }

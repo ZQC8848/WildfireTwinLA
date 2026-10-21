@@ -25,6 +25,13 @@ test('surface travel uses the CA probability, treatments and shared step duratio
         SpreadParams.stepMinutes = old;
     }
 });
+test('a fire burning inside a fuel break spreads out of it weakly', () => {
+    const g = grid(4, 1), mask = new Uint8Array(4), open = edgeMinutes(g, 0, 1, calm, mask, { timeScale: 1 });
+    mask[0] = 1;
+    assert.ok(Math.abs(edgeMinutes(g, 0, 1, calm, mask, { timeScale: 1 }) - open / TreatmentEffect.break.fuelMul) < 1e-5);
+    mask[1] = 1;
+    assert.ok(Math.abs(edgeMinutes(g, 0, 1, calm, mask, { timeScale: 1 }) - open / TreatmentEffect.break.fuelMul ** 2) < 1e-3);
+});
 test('coarse edges preserve the fine-grid physical surface time scale', () => {
     const fine = grid(16, 4), coarse = downsample(fine, 4);
     const a = edgeMinutes(fine, 0, 1, calm, new Uint8Array(64), { timeScale: 1 });
@@ -39,7 +46,8 @@ test('CA permits diagonal ignition past two orthogonal unburnable cells', () => 
     g.data[8 + 3] = 0;
     assert.ok(Number.isFinite(createCore(g).computeArrival([0], calm, new Uint8Array(4))[3]));
 });
-function islands(rows = 1) {
+// The home sits 5 cells (125 m) downwind of the source, inside light-ember range at 10 m/s
+function islands(rows = 1, gap = 5) {
     const g = grid(21, rows + 4);
     for (let c = 0; c < g.meta.width * g.meta.height; c++)
         g.data[c * 4 + 3] = 0;
@@ -49,7 +57,7 @@ function islands(rows = 1) {
         weight: number;
     }[] = [];
     for (let y = 2; y < rows + 2; y++) {
-        const source = y * 21, cell = source + 16;
+        const source = y * 21, cell = source + gap;
         g.data.set([0, 1, 1, 1], source * 4);
         g.data.set([0, 1, 1, 2], cell * 4);
         ignitions.push(source);
@@ -62,6 +70,11 @@ test('ember transport reaches homes over a nonburnable gap; calm and spotting-of
     assert.ok(Number.isFinite(createCore(g).computeArrival(ignitions, eastward, new Uint8Array(n))[cell]));
     assert.equal(createCore(g).computeArrival(ignitions, calm, new Uint8Array(n))[cell], Infinity);
     assert.equal(createCore(g, { spread: { spotting: false } }).computeArrival(ignitions, eastward, new Uint8Array(n))[cell], Infinity);
+});
+test('light embers burn out: none reach a home beyond the burnout distance', () => {
+    const { g, ignitions, buildings } = islands(1, 16), cell = buildings[0].cell, n = g.meta.width * g.meta.height;
+    assert.ok(16 * g.meta.cellSize > SpreadParams.spot.distMaxPerWindMs * eastward.speedMs);
+    assert.equal(createCore(g).computeArrival(ignitions, eastward, new Uint8Array(n))[cell], Infinity);
 });
 test('Zone 0 lowers expected ember exposure and is selected without land strip candidates', () => {
     const { g, ignitions, buildings } = islands(), n = g.meta.width * g.meta.height;

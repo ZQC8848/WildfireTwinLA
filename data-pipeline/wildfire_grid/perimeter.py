@@ -9,7 +9,8 @@ Order of preference, each labelled in the output so the frontend never calls a p
    detections in the replay window. This is coarse: about 563 ha against the reported 570 acres
    (231 ha).
 
-Writes data/norte/perimeter.json, which `wildfire-norte-replay` adds as the final incident event.
+Writes data/norte/perimeter.json, which `wildfire-norte-replay` sends when it was observed, and
+always writes the VIIRS-detected area to data/norte/viirs-area.json, which closes day one.
 """
 
 import argparse
@@ -40,8 +41,13 @@ def _grid_transform(meta: dict) -> Affine:
     return Affine(cell, 0, meta["originUTM"][0], 0, -cell, meta["originUTM"][1])
 
 
-def fetch_wfigs(name: str = "NORTE", state: str = "US-CA") -> dict | None:
-    """Most recent WFIGS perimeter polygon for the incident, or None."""
+def fetch_wfigs(name: str = "NORTE", state: str = "US-CA", path: Path | None = None) -> dict | None:
+    """Most recent WFIGS perimeter polygon for the incident, or None; read from `path` if given."""
+    if path:
+        features = json.loads(path.read_text()).get("features") or []
+        return max(
+            features, key=lambda f: f["properties"].get("poly_DateCurrent") or 0, default=None
+        )
     for layer in WFIGS_LAYERS:
         params = urlencode(
             {
@@ -156,11 +162,29 @@ def viirs_footprint_cells(meta: dict, pixels: list[dict]) -> list[int]:
     return np.flatnonzero(mask).tolist()
 
 
+def viirs_area(meta: dict, raw_dir: Path) -> dict:
+    """Union of the day-one VIIRS pixel footprints (coarse; not a perimeter)."""
+    from .norte import NORTE_BBOX, NORTE_IGNITION, REPLAY_END
+
+    pixels = viirs_pixels(raw_dir, NORTE_IGNITION, REPLAY_END, NORTE_BBOX)
+    cells = viirs_footprint_cells(meta, pixels)
+    return {
+        "source": "NASA FIRMS VIIRS 375 m detections",
+        "method": f"union of {len(pixels)} pixel footprints (scan x track), 10-16 passes",
+        "official": False,
+        "label": "Satellite-detected area (VIIRS, coarse)",
+        "observedAt": "2026-10-16T21:48:00Z",
+        "areaHa": round(len(cells) * float(meta["cellSize"]) ** 2 / 1e4, 1),
+        "cells": cells,
+    }
+
+
 def build_perimeter(meta: dict, raw_dir: Path, args: argparse.Namespace) -> dict:
     from .norte import NORTE_BBOX, NORTE_IGNITION, REPLAY_END
 
     cell_ha = float(meta["cellSize"]) ** 2 / 1e4
-    feature = None if args.skip_wfigs else fetch_wfigs()
+    wfigs_file = Path(args.wfigs_file) if args.wfigs_file else None
+    feature = None if args.skip_wfigs else fetch_wfigs(path=wfigs_file)
     if feature:
         props = feature["properties"]
         cells = cells_from_geometry(meta, feature["geometry"])
@@ -213,6 +237,10 @@ def main() -> None:
     parser.add_argument("--raw-dir", default="../data/norte/raw")
     parser.add_argument("--output", default="../data/norte/perimeter.json")
     parser.add_argument("--skip-wfigs", action="store_true", help="Do not query NIFC")
+    parser.add_argument(
+        "--wfigs-file", help="Archived WFIGS perimeter GeoJSON instead of querying NIFC"
+    )
+    parser.add_argument("--viirs-output", default="../data/norte/viirs-area.json")
     parser.add_argument("--pre-nir", help="Pre-fire Sentinel-2 B08")
     parser.add_argument("--pre-swir", help="Pre-fire Sentinel-2 B12")
     parser.add_argument("--post-nir", help="Post-fire Sentinel-2 B08")
@@ -222,6 +250,7 @@ def main() -> None:
     meta = json.loads(Path(args.grid).read_text())
     result = build_perimeter(meta, Path(args.raw_dir), args)
     Path(args.output).write_text(json.dumps(result) + "\n")
+    Path(args.viirs_output).write_text(json.dumps(viirs_area(meta, Path(args.raw_dir))) + "\n")
     summary = {k: v for k, v in result.items() if k != "cells"}
     print(json.dumps(summary, indent=2))
 
