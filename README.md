@@ -1,85 +1,110 @@
-# WildfireTwinLA：洛杉矶山火数字孪生
+# WildfireTwinLA: a wildfire digital twin for Southern California
 
-在浏览器里用 Three.js 构建洛杉矶山地的 3D 数字孪生：用卫星数据持续更新植被燃料状态，在 GPU 上模拟火势蔓延，用算法辅助人工决定在哪里做燃料处理（防火带、计划烧除、房屋硬化）最能保护社区；火灾发生时实时转发火情、推演蔓延，火线逼近时通知社区住户。
+A 3D digital twin of the San Clemente / San Juan Capistrano hills that runs in the browser
+(Three.js). It keeps vegetation fuel up to date from satellite data and simulates fire spread on
+the GPU. Algorithms help people decide where fuel treatments (fuel breaks, prescribed burns,
+home hardening) protect communities best. During a fire it forwards hotspots, projects the spread
+and prioritizes outreach to the homes the fire will reach first.
 
-- 活动：The Dual-Use Hackathon（InnovateLA × USC Viterbi，LA Tech Week 2026 闭幕活动，2026-10-16 至 10-18）
-- 详细技术方案：[docs/technical-design.md](docs/technical-design.md)
-- 数据与实时后端设计：[docs/backend-design.md](docs/backend-design.md)
-- B 模块交付、时间线与 README 合规审计：[docs/backend-delivery-and-compliance.md](docs/backend-delivery-and-compliance.md)
-- 离线网格工具：[data-pipeline/README.md](data-pipeline/README.md)
-- 实时后端运行说明：[server/README.md](server/README.md)
-- 团队分工与接口约定：[docs/team-plan.md](docs/team-plan.md)
-- 当前演示事件与数据边界：[docs/norte-fire.md](docs/norte-fire.md)
-- 地形风场格式与生成方法：[docs/wind-field.md](docs/wind-field.md)
+**Try it live: <https://wildfiretwinla.vercel.app/>** (runs entirely in your browser; residents
+and calls are simulated)
 
-当前 `main` / `b/backend` 数据域是 **2026 Norte Fire（San Juan Capistrano / San
-Clemente）**。Respond 默认播放 Norte 公共数据回放；Eaton 仅作为兼容的旧回放保留。
+- Event: The Dual-Use Hackathon (InnovateLA × USC Viterbi, closing event of LA Tech Week 2026,
+  2026-10-16 to 10-18)
+- Technical design: [docs/technical-design.md](docs/technical-design.md)
+- Data and realtime backend design: [docs/backend-design.md](docs/backend-design.md)
+- Backend delivery, timeline and compliance audit: [docs/backend-delivery-and-compliance.md](docs/backend-delivery-and-compliance.md)
+- Offline grid tools and replay builder: [data-pipeline/README.md](data-pipeline/README.md)
+- Realtime backend: [server/README.md](server/README.md)
+- Emergency contact (call lines, queue, texts): [docs/emergency-contact.md](docs/emergency-contact.md)
+- Demo incident and data boundaries: [docs/norte-fire.md](docs/norte-fire.md)
+- Terrain wind field format: [docs/wind-field.md](docs/wind-field.md)
+- Deployment (Vercel): [docs/deploy.md](docs/deploy.md)
+- Team roles and interfaces: [docs/team-plan.md](docs/team-plan.md)
 
-## 核心功能
+The demo incident is the **2026 Norte Fire (San Clemente / San Juan Capistrano, Orange
+County)**. Respond mode replays it from public data: day one of the fire, then the official
+updates of the next two days. Eaton is kept only as a legacy replay.
 
-| 模块 | 内容 | 地位 |
+## Features
+
+| Module | What it does | Status |
 |---|---|---|
-| 3D 场景 | DEM 地形 mesh、卫星底图、燃料热力图、建筑、火焰与烟雾、等时线、时间轴 | 必须 |
-| 火势蔓延 | GPU 元胞自动机（坡度、风、燃料、飞火），64 路集合预报给出燃烧概率与到达时间 | 核心 |
-| 实时火情转发 | 轮询 NASA FIRMS、GOES-18 和风况，聚类成火灾事件，同化进模拟，通过 WebSocket/SSE 和 webhook 推送 | 核心 |
-| 人工防控算法 | 风险图、火流咽喉点、预算约束下的燃料处理优化；用户可手动画处理区并与算法方案对比 | 核心 |
-| AI 外呼 | 火线预计到达社区时，通过 Retell 给主动登记的住户打电话，回写通话结果 | Feature |
+| 3D scene | DEM terrain, satellite imagery, fuel layers, building and tree models, flames and smoke, isochrones, timeline | Done |
+| Fire spread | GPU cellular automaton (slope, terrain-adjusted wind, fuel, dryness, embers); a 64-run ensemble gives burn probability and arrival time | Done |
+| Norte replay | NIFC ignitions, NASA FIRMS VIIRS passes and NOAA HRRR wind, assimilated into the simulation and scored against the satellite detections. Crews' knockdown stops the model fire and a later satellite pass with no heat puts it out. CAL FIRE containment, lifted orders and the NIFC perimeter follow | Done |
+| Live feed | Polls NASA FIRMS, GOES-18 and wind, clusters hotspots into incidents and pushes them over WebSocket (needs the backend) | Done |
+| Treatment planning | Draw fuel breaks, burns, thinning and home hardening; compare your plan with greedy and min-cut plans under the same fire, 5 runs each | Done |
+| Emergency contact | Calls the nearest homes first on 6 lines and texts everyone nearby; tracks no answers and requests for help on the map | Simulated (fictional residents); real Retell calls and SMS planned |
 
-## 数据源
+## Data sources
 
-| 用途 | 数据源 | 说明 |
+| Use | Source | Notes |
 |---|---|---|
-| 地形 | AWS Terrain Tiles（Terrarium）、USGS 3DEP | 用于分析和模拟 |
-| 视觉增强 | Google Photorealistic 3D Tiles | 只做显示；Google 条款限制从中提取数据做分析 |
-| 植被燃料 | Copernicus Sentinel-2 L2A（NDVI、NDMI），LANDFIRE FBFM40 | Sentinel-2 约 5 天重访一次，是周期更新而非实时 |
-| 实时火点 | NASA FIRMS（VIIRS/MODIS）、GOES-18 ABI FDC | FIRMS 约 3 小时内、375 m；GOES 每 5 分钟、2 km |
-| 风况 | Open-Meteo、NWS api.weather.gov | 免费，无需 key |
-| 建筑 | Microsoft US Building Footprints、OpenStreetMap | — |
-| 验证 | NIFC WFIGS Norte 火界（发布前使用明确标注的临时烧迹地） | 当前 WFIGS 尚无 Norte 周界，不能把热点外包络冒充官方火界 |
+| Terrain | USGS 3DEP | Analysis and simulation |
+| Fuel | LANDFIRE FBFM40, Copernicus Sentinel-2 L2A (NDVI, NDMI) | Sentinel-2 revisits about every 5 days: periodic, not real time |
+| Hotspots | NASA FIRMS (VIIRS 375 m), GOES-18 ABI FDC (2 km, every 5 min) | FIRMS arrives within about 3 hours |
+| Wind | NOAA HRRR via Open-Meteo; WindNinja for terrain-adjusted wind | Free, no key |
+| Buildings, roads | OpenStreetMap | — |
+| Incident status | NIFC WFIGS (ignitions, perimeter), CAL FIRE incident updates | The official Norte perimeter (570 acres) replaced the coarse VIIRS-detected area once NIFC published it |
 
-## 对现实的几点认识
+## What we learned about the real problem
 
-1. **洛杉矶山地以灌木丛（chaparral）和草地为主**，燃料建模要看类型、连续性和含水量，不能只看"树的密度"。
-2. **Santa Ana 大风下，飞火（ember）会跳过防火带**。2025 年 Palisades、Eaton 火灾中，房屋多由飞火点燃。所以算法必须模拟飞火，并把房屋 Zone 0 硬化纳入处理手段。
-3. **计划烧除只能由 CAL FIRE 等机构执行**，本系统是决策辅助工具，不下达指令。
-4. **告警以转达和放大官方疏散令为主**，自身的蔓延预测标注为"非官方参考"。
-5. **住户联系方式只来自主动登记（opt-in）**。AI 语音外呼受 TCPA 约束（FCC 2024 年裁定 AI 语音属于人工语音），紧急用途豁免是否适用需法律确认。
+1. **These hills are mostly grass, sage scrub and chaparral.** Fuel modelling needs type,
+   continuity and moisture, not just tree density.
+2. **Embers decide many outcomes.** Most homes lost in the 2025 Palisades and Eaton fires were
+   ignited by embers. The model treats short-lived grass and scrub embers separately from rare
+   lofted ones (the Norte Fire's second ignition, MIRADA, was a spot fire 2.4 km downwind). A
+   150 m fuel break stops ordinary embers, but Santa Ana winds carry them across, which is why
+   home hardening is one of the treatments.
+3. **Only agencies such as CAL FIRE carry out prescribed burns.** This is a decision-support tool;
+   it gives no orders.
+4. **Alerts relay and amplify official evacuation orders.** The tool labels its own spread
+   projections as unofficial.
+5. **Residents' contact details come only from opt-in.** AI voice calls fall under the TCPA (the
+   FCC ruled in 2024 that AI voices count as artificial voices); whether the emergency exemption
+   applies needs legal review.
 
-## 现有产品
+## Existing products
 
-| 产品 | 做什么 | 与本项目的关系 |
+| Product | What it does | Relation to this project |
 |---|---|---|
-| Watch Duty | 非营利实时火情 App | 实时转发的参照；本项目的差异在 3D 推演与防控规划 |
-| Technosylva | CAL FIRE 使用的专业蔓延预测 | 专业版蔓延模型 |
-| FlamMap / TOM | 燃料处理优化工具 | 防控算法的专业参照，界面不面向大众 |
-| Genasys Protect、Alert LA County | 官方疏散分区与警报 | 告警的权威来源 |
-| ALERTCalifornia、Pano AI | 摄像头加 AI 早期发现 | 发现环节 |
+| Watch Duty | Nonprofit live fire app | Reference for live forwarding; we add 3D projection and treatment planning |
+| Technosylva | Professional spread forecasting used by CAL FIRE | Professional-grade spread model |
+| FlamMap / TOM | Fuel treatment optimization | Professional reference for planning; not built for the public |
+| Genasys Protect, Alert LA County | Official evacuation zones and alerts | The authoritative source for alerts |
+| ALERTCalifornia, Pano AI | Cameras plus AI early detection | Detection stage |
 
-## Dual-Use 定位
+## Dual use
 
-黑客松的第一条评分是 dual-use 契合度，并要求回答三道自检题。
-
-| 测试 | 回答 |
+| Test | Answer |
 |---|---|
-| 平日（谁付钱） | 防控规划工具：电力公司植被管理（SCE 等负有法定清理义务）、LA County Fire brush clearance、Fire Safe Council、保险公司 |
-| 危机（凌晨 3 点、网络断了） | 平日积累的集合预报构成"风况 × 起火区"情景库，PWA 离线缓存；断网时按当前风况调出最接近的情景 |
-| 迁移（预算只有十分之一） | Sentinel-2、FIRMS、Copernicus DEM 均为全球免费数据，换地区只需换 bbox；Google 只负责视觉 |
+| Ordinary day (who pays) | Treatment planning for utility vegetation management, county brush clearance, Fire Safe Councils and insurers |
+| Crisis (3 a.m., network down) | The everyday ensemble runs build a library of wind × ignition scenarios; offline, the closest scenario for the current wind is ready |
+| Migration (a tenth of the budget) | Sentinel-2, FIRMS and Copernicus elevation are free and global; moving to a new region means changing the bbox. Fuel maps, footprints and contact consent need local sources |
 
-**赛道倾向：Energy**（合作方 BASE；SCE 为赞助方）。蔓延推演可以输出"哪几条线路受威胁"，用精准断电代替大面积 PSPS，回答"如何让最需要的人保住电"。最终以赛事公布的详细 prompt 为准。
+## Run locally
 
-## 黑客松要点
+```bash
+npm --prefix web ci
+npm --prefix web run dev            # http://localhost:5173
 
-- 主题：Preparing for Disaster。做 dual-use 方案，避免危机中的系统停摆；强调韧性、效率与成本。
-- 赛道：Marine、Energy（BASE）、Communications（Retell）、Ports。
-- 评分（各 1–5 分）：dual-use 契合度、技术执行与 MVP、可行性与影响、对 twist 的适应、demo 与 pitch。
-- 三次 twist，每次 6 小时响应窗口，鼓励但不强制采纳。
-- 前三名：$1,000 / $500 / $200，并进入 DAS Family InnovateLA 孵化器，春季争夺 $30K。
-- 每队 2–4 人，至少一名 USC 学生；IBM Bob 单独设奖；IBM 与 NASA 在 Hugging Face 开放了地理空间模型（含火烧迹地 burn scar）。
-- 入口：innovatelosangeles.com/dual-use；提交：innovatela.devpost.com。
+cd server && uv run uvicorn app.main:app --port 8010   # optional backend: replay and dispatcher
+```
 
-## 待确认
+Without a backend (as on the public site) the replay plays in the browser and the emergency
+contact dispatcher runs in a Web Worker. Tests: `npm test` in `packages/core`, `pytest` in
+`server` and `data-pipeline`.
 
-- [ ] 赛事详细 prompt 与最终赛道
-- [ ] SCE 线路级地理数据是否公开可得
-- [ ] CAL FIRE 事件接口与 Genasys 疏散分区数据是否可程序化获取
-- [ ] Google Maps Platform 3D Tiles 的免费额度
+## Hackathon
+
+- Theme: Preparing for Disaster. Build dual-use solutions that keep working in a crisis, with an
+  emphasis on resilience, efficiency and cost.
+- Tracks: Marine, Energy (BASE), Communications (Retell), Ports. We built for resilient
+  communications.
+- Judging (1–5 each): dual-use fit, technical execution and MVP, feasibility and impact,
+  response to the twists, demo and pitch.
+- Entry: innovatelosangeles.com/dual-use; submissions: innovatela.devpost.com.
+
+Experimental, unofficial model outputs. Demo contacts and calls are fictional. Always follow
+official evacuation instructions.
