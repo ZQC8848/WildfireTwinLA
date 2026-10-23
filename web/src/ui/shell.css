@@ -515,6 +515,11 @@ body[data-mode="respond"] .rail [data-mode-only="respond"] {
     bottom: calc(var(--bottombar-h) + var(--drawer-h));
   }
 
+  /* 时间轴贴在地图下沿，不压在抽屉上 */
+  .timeline-track {
+    bottom: calc(var(--bottombar-h) + var(--drawer-h));
+  }
+
   /* 窄屏：图例与署名收起；工具条只保留图标 */
   .map-legend,
   .map-attrib {
@@ -538,6 +543,145 @@ body[data-mode="respond"] .rail [data-mode-only="respond"] {
 
   .topbar-meta span:first-child {
     display: none;
+  }
+}
+
+/* ---- 手机：顶栏只留标题与模式切换；工具条变成地图顶部一行可横向滑动的图标；底栏分三行 ---- */
+@media (max-width: 600px) {
+  :root {
+    --bottombar-h: 128px;
+    --drawer-h: 34vh;
+  }
+
+  .topbar {
+    grid-template-columns: 1fr auto;
+    padding: 0 12px;
+  }
+
+  .brand {
+    font-size: var(--t-15);
+  }
+
+  .mode-switch button {
+    padding: 6px 14px;
+  }
+
+  .topbar-meta {
+    display: none;
+  }
+
+  .map-tools {
+    left: 8px;
+    right: 8px;
+    top: calc(var(--topbar-h) + 8px);
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .map-tools::-webkit-scrollbar {
+    display: none;
+  }
+
+  .map-tools .tool-group {
+    flex-direction: row;
+    padding: 0 0 0 4px;
+    border-top: 0;
+    border-left: 1px solid var(--rule);
+  }
+
+  /* 手机上没有键盘和右键，飞行模式用不了 */
+  .map-tools .tool-group:has(.camera-mode) {
+    display: none;
+  }
+
+  .map-tools .tool-btn {
+    width: 34px;
+    height: 34px;
+    flex: none;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .compass {
+    width: auto;
+    padding: 2px;
+  }
+
+  .compass svg {
+    width: 32px;
+    height: 32px;
+  }
+
+  /* 底栏三行：运行与速度 / 当前时刻与风模型 / 风向风速 */
+  .bottombar {
+    flex-wrap: wrap;
+    align-content: center;
+    gap: 6px 10px;
+    padding: 6px 12px;
+    overflow-x: visible;
+  }
+
+  .bar-spacer,
+  .bar-group .bar-label,
+  .speed-label,
+  .bar-group label[for="wind-dir"] {
+    display: none;
+  }
+
+  .bottombar > .bar-group:nth-child(1) {
+    order: 1;
+    gap: 6px;
+  }
+
+  .bottombar > .bar-group:nth-child(2) {
+    order: 2;
+    flex: 1;
+  }
+
+  .speed-range {
+    flex: 1;
+    width: auto;
+    min-width: 60px;
+  }
+
+  .timeline {
+    order: 3;
+    flex: 1;
+  }
+
+  .timeline .elapsed {
+    min-width: 0;
+    font-size: var(--t-15);
+  }
+
+  .bar-group:has(#wind-model) {
+    order: 4;
+  }
+
+  .bar-group:has(#wind-dir) {
+    order: 5;
+    width: 100%;
+  }
+
+  .bar-group #wind-speed {
+    flex: 1;
+    width: auto;
+    min-width: 50px;
+  }
+
+  .segmented#wind-model button {
+    padding-left: 8px;
+    padding-right: 8px;
+    font-size: var(--t-13);
+  }
+
+  .bottombar .btn {
+    padding-left: 12px;
+    padding-right: 12px;
   }
 }
 
